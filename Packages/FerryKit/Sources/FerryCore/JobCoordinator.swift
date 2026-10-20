@@ -214,10 +214,11 @@ public final class JobCoordinator {
     // MARK: - 任务操作
 
     /// 创建任务并开始转存。`session` 是添加链接时打开的分享会话。
+    /// - Parameter downloadFolder: 用户为这个任务选择的下载目录。nil 时使用 `self.downloadFolder`（设置中的下载目录）。
     @discardableResult
-    public func addJob(session: ShareSession, entries: [ShareEntry]) -> Job {
+    public func addJob(session: ShareSession, entries: [ShareEntry], downloadFolder: DownloadFolder? = nil) -> Job {
         var job = Job(link: session.link, password: session.password, entries: entries, transferFolder: settings.transferFolder)
-        job.downloadFolder = downloadFolder
+        job.downloadFolder = downloadFolder ?? self.downloadFolder
         job.accountUK = accountUK
         jobs.insert(job, at: 0)
         invalidateIndex()

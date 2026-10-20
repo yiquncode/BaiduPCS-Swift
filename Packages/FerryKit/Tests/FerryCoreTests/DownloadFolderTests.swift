@@ -48,6 +48,48 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: other.appending(path: "a.bin").path))
     }
 
+    @Test func jobUsesFolderChosenForIt() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10_000)])
+        let chosen = DownloadFolder(url: try makeFolder(fixture, "chosen"), bookmark: Data("bookmark".utf8))
+        let access = FakeFolderAccess()
+        let coordinator = fixture.makeCoordinator(folderAccess: access)
+        await coordinator.start()
+
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries(), downloadFolder: chosen)
+        #expect(coordinator.job(job.id)?.downloadFolder == chosen)
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        #expect(try Data(contentsOf: chosen.url.appending(path: "a.bin")) == fixture.netdisk.data(at: job.remoteDirectory + "/a.bin"))
+        #expect(fixture.contents("a.bin") == nil)
+        #expect(access.opened == [chosen.url.path])
+        #expect(access.closed == [chosen.url.path])
+        // 设置中的下载目录不变。
+        #expect(coordinator.downloadFolder == DownloadFolder(url: fixture.downloads))
+        #expect(try fixture.store.load().first?.downloadFolder == chosen)
+    }
+
+    @Test func chosenFolderIsReopenedAfterRestart() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(400_000)])
+        let chosen = DownloadFolder(url: try makeFolder(fixture, "chosen"), bookmark: Data("bookmark".utf8))
+        let first = fixture.makeCoordinator(folderAccess: FakeFolderAccess())
+        await first.start()
+        fixture.server.setStalled(true)
+        let job = first.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries(), downloadFolder: chosen)
+        try await waitUntil("partial progress") {
+            guard let job = first.job(job.id), !job.files.isEmpty else { return false }
+            return first.progress(of: job).receivedBytes > 0
+        }
+        await first.shutdown()
+        fixture.server.setStalled(false)
+
+        let access = FakeFolderAccess()
+        let second = fixture.makeCoordinator(folderAccess: access)
+        await second.start()
+        #expect(access.opened == [chosen.url.path])
+        try await second.waitForPhase(.completed, of: job.id)
+        #expect(second.job(job.id)?.downloadFolder == chosen)
+        #expect(try Data(contentsOf: chosen.url.appending(path: "a.bin")) == fixture.netdisk.data(at: job.remoteDirectory + "/a.bin"))
+    }
+
     @Test func inaccessibleFolderFailsJobUntilFixed() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(400_000)])
         let job = try await startPartialDownload(fixture)

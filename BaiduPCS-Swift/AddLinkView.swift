@@ -1,6 +1,8 @@
 import AppKit
 import BaiduKit
+import FerryCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 添加链接：输入链接和提取码并打开分享，在文件树中勾选要下载的文件，然后下载。
 ///
@@ -16,6 +18,12 @@ struct AddLinkView: View {
     @State private var errorMessage: String?
     @State private var tree: ShareTree?
     @State private var isSubmitting = false
+    /// 用户在“保存到”菜单中用“其他…”选择的目录。只用于这个任务，不修改设置。
+    @State private var chosenFolders: [DownloadFolder] = []
+    /// nil 表示设置中的下载目录。
+    @State private var selectedFolder: DownloadFolder?
+    @State private var isChoosingFolder = false
+    @State private var folderError: String?
 
     private var isOpening: Bool { openTask != nil }
     private var canOpen: Bool { !linkText.trimmingCharacters(in: .whitespaces).isEmpty && !isOpening }
@@ -35,6 +43,11 @@ struct AddLinkView: View {
         .task { await fillFromPasteboard() }
         // 关闭 sheet 时取消正在打开的分享。
         .onDisappear { openTask?.cancel() }
+        .fileImporter(isPresented: $isChoosingFolder, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result {
+                chooseFolder(url)
+            }
+        }
     }
 
     private var linkFields: some View {
@@ -103,13 +116,80 @@ struct AddLinkView: View {
     }
 
     private var footer: some View {
-        HStack {
-            Spacer()
-            Button("取消", role: .cancel) { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button("下载", action: download)
-                .keyboardShortcut(tree == nil ? nil : .defaultAction)
-                .disabled(tree?.selection.isEmpty ?? true || isSubmitting)
+        VStack(alignment: .leading) {
+            if let folderError {
+                Label(folderError, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+            }
+            HStack {
+                folderPicker
+                Spacer()
+                Button("取消", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("下载", action: download)
+                    .keyboardShortcut(tree == nil ? nil : .defaultAction)
+                    .disabled(tree?.selection.isEmpty ?? true || isSubmitting)
+            }
+        }
+    }
+
+    /// “保存到”菜单中的一项。
+    private enum Destination: Hashable {
+        /// 设置中的下载目录。
+        case settings
+        case chosen(DownloadFolder)
+        /// “其他…”：打开面板选择目录，不改变当前选择。
+        case other
+    }
+
+    private var destination: Binding<Destination> {
+        Binding {
+            selectedFolder.map(Destination.chosen) ?? .settings
+        } set: { destination in
+            switch destination {
+            case .settings: selectedFolder = nil
+            case .chosen(let folder): selectedFolder = folder
+            case .other: isChoosingFolder = true
+            }
+        }
+    }
+
+    private var folderPicker: some View {
+        Picker("保存到", selection: destination) {
+            folderLabel(model.currentFolder.url).tag(Destination.settings)
+            ForEach(chosenFolders, id: \.self) { folder in
+                folderLabel(folder.url).tag(Destination.chosen(folder))
+            }
+            Divider()
+            Text("其他…").tag(Destination.other)
+        }
+        .pickerStyle(.menu)
+        .fixedSize()
+        .help((selectedFolder ?? model.currentFolder).url.path(percentEncoded: false))
+    }
+
+    private func folderLabel(_ url: URL) -> some View {
+        Label(FileManager.default.displayName(atPath: url.path(percentEncoded: false)), systemImage: "folder")
+    }
+
+    /// 选择的目录加入菜单并选中。它和菜单中已有的目录是同一位置时，选中已有的那一项。
+    private func chooseFolder(_ url: URL) {
+        folderError = nil
+        func isSameLocation(_ folder: DownloadFolder) -> Bool {
+            folder.url.standardizedFileURL.path == url.standardizedFileURL.path
+        }
+        if isSameLocation(model.currentFolder) {
+            selectedFolder = nil
+        } else if let existing = chosenFolders.first(where: isSameLocation) {
+            selectedFolder = existing
+        } else {
+            do {
+                let folder = try model.makeDownloadFolder(for: url)
+                chosenFolders.append(folder)
+                selectedFolder = folder
+            } catch {
+                folderError = "无法取得“\(url.lastPathComponent)”的访问权限：\(error.localizedDescription)"
+            }
         }
     }
 
@@ -181,7 +261,7 @@ struct AddLinkView: View {
     private func download() {
         guard let tree, !tree.selection.isEmpty, !isSubmitting else { return }
         isSubmitting = true
-        model.addJob(session: tree.session, entries: tree.selectedEntries)
+        model.addJob(session: tree.session, entries: tree.selectedEntries, downloadFolder: selectedFolder)
         dismiss()
     }
 }

@@ -135,8 +135,8 @@ final class AppModel {
         Task { await coordinator.updateSettings(settings) }
     }
 
-    /// 新任务的下载目录。任务记录它，以后每次启动用 bookmark 重新取得访问权限。
-    private var currentFolder: DownloadFolder {
+    /// 新任务默认的下载目录（设置中的下载目录）。任务记录它，以后每次启动用 bookmark 重新取得访问权限。
+    var currentFolder: DownloadFolder {
         DownloadFolder(url: downloadDirectory, bookmark: accessedDirectory == nil ? nil : settings.downloadDirectoryBookmark)
     }
 
@@ -176,6 +176,14 @@ final class AppModel {
             if isAccessing { url.stopAccessingSecurityScopedResource() }
             downloadDirectoryProblem = "无法保存下载目录的访问权限：\(error.localizedDescription)"
         }
+    }
+
+    /// 添加链接时为一个任务选择的下载目录。`url` 来自用户在打开面板中的选择。不修改设置。
+    /// 任务开始时 `JobCoordinator` 用 bookmark 取得访问权限，所以这里只在创建 bookmark 期间访问。
+    func makeDownloadFolder(for url: URL) throws -> DownloadFolder {
+        let isAccessing = url.startAccessingSecurityScopedResource()
+        defer { if isAccessing { url.stopAccessingSecurityScopedResource() } }
+        return DownloadFolder(url: url, bookmark: try url.bookmarkData(options: .withSecurityScope))
     }
 
     func useDefaultDownloadDirectory() {
@@ -223,8 +231,9 @@ final class AppModel {
         coordinator.jobs.contains { $0.isUnfinished }
     }
 
-    func addJob(session: ShareSession, entries: [ShareEntry]) {
-        coordinator.addJob(session: session, entries: entries)
+    /// `downloadFolder` 为 nil 时，任务使用设置中的下载目录。
+    func addJob(session: ShareSession, entries: [ShareEntry], downloadFolder: DownloadFolder? = nil) {
+        coordinator.addJob(session: session, entries: entries, downloadFolder: downloadFolder)
         requestNotificationAuthorization()
     }
 
