@@ -228,6 +228,11 @@ final class AppModel {
         requestNotificationAuthorization()
     }
 
+    /// 启动恢复完成前和移除期间，任务不接受操作。
+    func canOperate(on job: Job) -> Bool {
+        coordinator.isStarted && !coordinator.removingJobs.contains(job.id)
+    }
+
     func pause(_ job: Job) {
         Task { await coordinator.pause(job.id) }
     }

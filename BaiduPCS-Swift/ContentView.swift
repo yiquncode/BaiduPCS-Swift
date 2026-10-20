@@ -2,7 +2,7 @@ import BaiduKit
 import FerryCore
 import SwiftUI
 
-/// 主窗口：任务列表。没有任务且未登录时引导登录。
+/// 主窗口。没有任务且未登录时引导登录；否则显示侧边栏和任务列表（见 `MainView`）。
 struct ContentView: View {
     static let windowID = "main"
 
@@ -21,40 +21,10 @@ struct ContentView: View {
                     Button("登录…") { model.presentLogin() }
                         .buttonStyle(.borderedProminent)
                 }
+                .frame(minWidth: 560, minHeight: 360)
+                .safeAreaInset(edge: .top, spacing: 0) { Banners() }
             } else {
-                JobListView()
-            }
-        }
-        .frame(minWidth: 560, minHeight: 360)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(spacing: 0) {
-                if let warning = model.coordinator.loadWarning {
-                    Banner(message: warning) {
-                        Button("关闭") { model.coordinator.dismissLoadWarning() }
-                    }
-                }
-                if model.account == nil, !model.coordinator.jobs.isEmpty {
-                    Banner(message: "未登录百度网盘。添加任务、重试或获取新的下载链接前，请登录。") {
-                        Button("登录…") { model.presentLogin() }
-                    }
-                } else if model.isLoginExpired {
-                    Banner(message: "百度网盘登录已失效。正在进行的下载会继续；添加任务或获取新的下载链接前，请重新登录。") {
-                        Button("重新登录…") { model.presentLogin() }
-                    }
-                }
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.presentAddLink()
-                } label: {
-                    Label("添加链接", systemImage: "plus")
-                }
-                .help("添加分享链接（⌘N）")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                AccountMenu()
+                MainView()
             }
         }
         .sheet(item: $model.sheet) { sheet in
@@ -69,31 +39,31 @@ struct ContentView: View {
     }
 }
 
-private struct AccountMenu: View {
+/// 任务列表上方的提示条：加载警告、未登录、登录失效。
+struct Banners: View {
     @Environment(AppModel.self) private var model
-    @State private var isConfirmingLogOut = false
 
     var body: some View {
-        if let account = model.account {
-            Menu {
-                Button("重新登录…") { model.presentLogin() }
-                Button("退出登录…") { isConfirmingLogOut = model.requestLogOut() }
-                Divider()
-                SettingsLink { Text("设置…") }
-            } label: {
-                Label(account.username.isEmpty ? "已登录" : account.username,
-                      systemImage: model.isLoginExpired ? "person.crop.circle.badge.exclamationmark" : "person.crop.circle")
-                    .labelStyle(.titleAndIcon)
+        VStack(spacing: 0) {
+            if let warning = model.coordinator.loadWarning {
+                Banner(message: warning) {
+                    Button("关闭") { model.coordinator.dismissLoadWarning() }
+                }
             }
-            .help("账号")
-            .logOutConfirmation(isPresented: $isConfirmingLogOut)
-        } else {
-            Button("登录…") { model.presentLogin() }
+            if model.account == nil, !model.coordinator.jobs.isEmpty {
+                Banner(message: "未登录百度网盘。添加任务、重试或获取新的下载链接前，请登录。") {
+                    Button("登录…") { model.presentLogin() }
+                }
+            } else if model.isLoginExpired {
+                Banner(message: "百度网盘登录已失效。正在进行的下载会继续；添加任务或获取新的下载链接前，请重新登录。") {
+                    Button("重新登录…") { model.presentLogin() }
+                }
+            }
         }
     }
 }
 
-/// 主窗口顶部的提示条。
+/// 一条提示条。
 struct Banner<Actions: View>: View {
     let message: String
     @ViewBuilder let actions: Actions
