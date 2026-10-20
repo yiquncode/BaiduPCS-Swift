@@ -166,7 +166,8 @@ import Testing
         #expect(try fixture.store.load().isEmpty)
         #expect(coordinator.downloads[big.id] == nil)
         #expect(FileManager.default.fileExists(atPath: fixture.downloads.appending(path: "done.bin").path))
-        #expect(!FileManager.default.fileExists(atPath: fixture.downloads.appending(path: "big.bin.ferrydownload").path))
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: fixture.downloads.path)
+        #expect(!leftovers.contains { $0.hasSuffix(".ferrydownload") })
         #expect(fixture.netdisk.operations.last == .delete([job.remoteDirectory]))
         #expect(fixture.netdisk.remotePaths().isEmpty)
     }
