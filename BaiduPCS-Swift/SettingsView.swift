@@ -282,8 +282,10 @@ private struct AccountSettingsView: View {
                     }
                     HStack {
                         Spacer()
-                        Button("重新登录…", action: showLogin)
-                        Button("退出登录…") { isConfirmingLogOut = model.requestLogOut() }
+                        if model.isLoginExpired {
+                            Button("重新登录…", action: showLogin)
+                        }
+                        Button("退出登录") { isConfirmingLogOut = model.requestLogOut() }
                     }
                 } else {
                     LabeledContent("状态", value: "未登录")

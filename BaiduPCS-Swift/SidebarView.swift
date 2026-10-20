@@ -81,8 +81,10 @@ private struct AccountView: View {
     var body: some View {
         if let account = model.account {
             Menu {
-                Button("重新登录…") { model.presentLogin() }
-                Button("退出登录…") { isConfirmingLogOut = model.requestLogOut() }
+                if model.isLoginExpired {
+                    Button("重新登录…") { model.presentLogin() }
+                }
+                Button("退出登录") { isConfirmingLogOut = model.requestLogOut() }
                 Divider()
                 SettingsLink { Text("设置…") }
             } label: {
