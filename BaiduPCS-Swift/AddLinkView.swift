@@ -111,9 +111,9 @@ struct AddLinkView: View {
             }
         } else {
             ContentUnavailableView {
-                Label("输入分享链接后按回车打开", systemImage: "link")
+                Label("打开分享链接", systemImage: "link")
             } description: {
-                Text("支持 https://pan.baidu.com/s/1… 和 https://pan.baidu.com/share/init?surl=… 两种格式。链接带提取码时自动填入。")
+                Text("粘贴百度网盘分享链接，点击“打开”或按回车键。链接带提取码时自动填入。")
             }
         }
     }
