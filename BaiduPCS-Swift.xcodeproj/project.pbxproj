@@ -13,8 +13,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		18F1CB403086E8A000A59465 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
 		18F1CB143086E87B00A59465 /* BaiduPCS-Swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "BaiduPCS-Swift.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		18F1CB403086E8A000A59465 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -48,20 +48,20 @@
 			);
 			sourceTree = "<group>";
 		};
-		18F1CB413086E8A000A59465 /* Config */ = {
-			isa = PBXGroup;
-			children = (
-				18F1CB403086E8A000A59465 /* Shared.xcconfig */,
-			);
-			path = Config;
-			sourceTree = "<group>";
-		};
 		18F1CB153086E87B00A59465 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				18F1CB143086E87B00A59465 /* BaiduPCS-Swift.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		18F1CB413086E8A000A59465 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				18F1CB403086E8A000A59465 /* Shared.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
