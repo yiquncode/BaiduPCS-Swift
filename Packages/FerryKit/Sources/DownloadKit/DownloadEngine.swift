@@ -65,14 +65,20 @@ public actor DownloadEngine {
         broadcaster.stream()
     }
 
-    /// 从状态目录恢复未完成的文件下载。暂停或失败过的恢复为 paused，其余恢复为 queued 并开始下载。
+    /// 从状态目录恢复文件下载。已完成、但应用还没有用 `cancel(id:)` 确认的，恢复为 completed，不再下载。
+    /// 暂停或失败过的恢复为 paused，其余恢复为 queued 并开始下载。
     /// 调用前，应用要先取得目标目录的访问权限。
     @discardableResult
     public func restore() throws -> [DownloadSnapshot] {
         let records = try store.loadAll().sorted { $0.createdAt < $1.createdAt }
         var restored: [DownloadSnapshot] = []
         for record in records where entries[record.request.id] == nil {
-            let entry = Entry(record: LiveRecord(record), state: record.isPaused ? .paused : .queued)
+            let state: DownloadState = if let url = record.completedURL {
+                .completed(url)
+            } else {
+                record.isPaused ? .paused : .queued
+            }
+            let entry = Entry(record: LiveRecord(record), state: state)
             add(entry)
             restored.append(snapshot(of: entry))
         }
@@ -121,7 +127,10 @@ public actor DownloadEngine {
         schedule()
     }
 
-    /// 停止下载，删除临时文件和状态文件。对已完成的下载，只是不再跟踪它，不删除下载好的文件。
+    /// 停止下载，删除临时文件和状态文件。
+    ///
+    /// 已完成的下载也要调用：引擎在完成后保留状态文件，`restore()` 时把它恢复为 completed，
+    /// 直到应用保存了最终路径并调用这个方法确认。这时只删除状态文件，不删除下载好的文件。
     public func cancel(id: String) async {
         guard let entry = entries.removeValue(forKey: id) else { return }
         order.removeAll { $0 == id }
@@ -211,8 +220,8 @@ public actor DownloadEngine {
         entry.worker = nil
         switch outcome {
         case .completed(let url):
+            // 传输任务已经保存了完成记录。应用调用 cancel(id:) 确认后才删除它。
             entry.state = .completed(url)
-            store.delete(id: id)
         case .failed(let failure):
             entry.state = .failed(failure)
             entry.record.isPaused = true

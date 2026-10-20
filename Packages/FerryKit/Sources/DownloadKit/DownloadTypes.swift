@@ -114,6 +114,7 @@ public enum DownloadState: Sendable, Hashable {
     case running
     case paused
     /// 关联值是最终文件路径。它可能和 `destination` 不同（见 `DownloadRequest.destination`）。
+    /// 应用保存这个路径后，要调用 `DownloadEngine.cancel(id:)` 确认，否则下次 `restore()` 还会返回它。
     case completed(URL)
     /// 临时文件和进度都保留。`resume(id:)` 从断点继续。
     case failed(DownloadFailure)

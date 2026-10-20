@@ -44,7 +44,13 @@ struct FileTransfer: Sendable {
         }
         checkpoints.cancel()
         await checkpoints.value
-        if case .completed = outcome {} else { checkpoint() }
+        if case .completed(let url) = outcome {
+            // 先停止检查点，再保存完成记录，所以旧的进度不会覆盖它。
+            record.update { $0.completedURL = url }
+            try? store.save(record.value)
+        } else {
+            checkpoint()
+        }
         return outcome
     }
 

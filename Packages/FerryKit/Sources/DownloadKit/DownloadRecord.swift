@@ -33,6 +33,8 @@ struct DownloadRecord: Codable, Sendable {
     /// nil 表示还没有规划分片。
     var segments: [Segment]?
     var isPaused: Bool
+    /// 下载完成后的最终路径。应用调用 `cancel(id:)` 确认之前，状态文件保留，记录这个路径。
+    var completedURL: URL?
 
     init(request: DownloadRequest) {
         self.request = request

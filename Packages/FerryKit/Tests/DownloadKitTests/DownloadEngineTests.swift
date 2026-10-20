@@ -28,7 +28,7 @@ private let megabyte = 1 << 20
         #expect(location == fixture.downloadsDirectory.appendingPathComponent("movie.mp4"))
         #expect(fixture.contents("movie.mp4") == data)
         #expect(!FileManager.default.fileExists(atPath: request.temporaryURL.path))
-        #expect(try fixture.savedRecords().isEmpty)
+        #expect(try fixture.savedRecords().map(\.completedURL) == [location])
 
         let log = fixture.server.log
         #expect(log.count == 12)
@@ -291,6 +291,32 @@ private let megabyte = 1 << 20
         for await event in events {
             if event == .removed(id: "a.bin") { break }
         }
+    }
+
+    @Test func completedRecordIsKeptUntilCancel() async throws {
+        let fixture = Fixture()
+        let data = fixture.addFile("a.bin", size: 300 * kilobyte)
+        let first = fixture.makeEngine()
+        try await first.enqueue(fixture.request("a.bin"))
+        let location = try await first.waitForCompletion(of: "a.bin")
+        await first.shutdown()
+        #expect(try fixture.savedRecords().map(\.completedURL) == [location])
+
+        // 应用在保存最终路径前退出：新的引擎把它恢复为 completed，不再下载。
+        fixture.server.clearLog()
+        let second = fixture.makeEngine()
+        let restored = try await second.restore()
+        #expect(restored.map(\.state) == [.completed(location)])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await second.snapshot(id: "a.bin")?.state == .completed(location))
+        #expect(fixture.server.log.isEmpty)
+        #expect(fixture.source.resolveCount == 1)
+
+        await second.cancel(id: "a.bin")
+        #expect(await second.snapshot(id: "a.bin") == nil)
+        #expect(try fixture.savedRecords().isEmpty)
+        #expect(fixture.contents("a.bin") == data)
+        #expect(try await fixture.makeEngine().restore().isEmpty)
     }
 
     @Test func doesNotOverwriteExistingFiles() async throws {
