@@ -1,7 +1,27 @@
 import SwiftUI
 
-/// 粘贴 Cookie 登录。
+/// 登录 sheet。默认显示网页登录，可以切换到粘贴 Cookie 登录。
 struct LoginView: View {
+    private enum Method {
+        case web
+        case cookie
+    }
+
+    @State private var method = Method.web
+
+    var body: some View {
+        switch method {
+        case .web: WebLoginView { method = .cookie }
+        case .cookie: CookieLoginView { method = .web }
+        }
+    }
+}
+
+/// 粘贴 Cookie 登录。
+private struct CookieLoginView: View {
+    /// 切换回网页登录。
+    let useWebLogin: () -> Void
+
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var cookie = ""
@@ -35,6 +55,8 @@ struct LoginView: View {
             .formStyle(.grouped)
 
             HStack {
+                Button("网页登录…", action: useWebLogin)
+                    .disabled(isLoggingIn)
                 if isLoggingIn {
                     ProgressView().controlSize(.small)
                     Text("正在校验…").foregroundStyle(.secondary)

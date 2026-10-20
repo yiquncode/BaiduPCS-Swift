@@ -16,7 +16,7 @@ struct ContentView: View {
                 ContentUnavailableView {
                     Label("登录百度网盘", systemImage: "person.crop.circle.badge.questionmark")
                 } description: {
-                    Text("Ferry 使用百度网盘网页版的 Cookie 登录。登录后可以粘贴分享链接下载文件。")
+                    Text("在百度网盘的登录页登录后，可以粘贴分享链接下载文件。")
                 } actions: {
                     Button("登录…") { model.presentLogin() }
                         .buttonStyle(.borderedProminent)

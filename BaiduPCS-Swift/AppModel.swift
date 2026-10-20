@@ -78,7 +78,11 @@ final class AppModel {
     // MARK: - 账号
 
     func logIn(cookie: String) async throws {
-        let credential = try Credential.parse(cookie)
+        try await logIn(credential: Credential.parse(cookie))
+    }
+
+    /// 校验凭据，通过后存入 Keychain 并开始使用。调用方取消时不保存。
+    func logIn(credential: Credential) async throws {
         let client = BaiduClient(credential: credential)
         let account = try await client.validate()
         // 用户在校验期间取消了登录。
