@@ -222,7 +222,7 @@ private struct NetworkSettingsView: View {
                         .foregroundStyle(.orange)
                 }
             } footer: {
-                Text("网盘请求、文件下载和网页登录都使用这个代理。")
+                Text("网盘请求和文件下载使用这个代理。网页登录使用系统设置。")
                     .foregroundStyle(.secondary)
             }
         }

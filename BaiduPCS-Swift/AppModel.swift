@@ -211,11 +211,6 @@ final class AppModel {
         settings.proxy.problem(password: proxyPassword)
     }
 
-    /// 网页登录的数据存储使用的代理。为空时使用系统设置。
-    var proxyConfigurations: [ProxyConfiguration] {
-        Self.proxyConfigurations(activeProxy)
-    }
-
     /// 设置页一次提交代理设置和密码，所以两者都变化时只换一次会话。
     func setProxy(_ proxy: ProxySettings, password: String) {
         if password != proxyPassword {
@@ -251,12 +246,8 @@ final class AppModel {
         }
     }
 
-    private static func proxyConfigurations(_ proxy: ActiveProxy?) -> [ProxyConfiguration] {
-        proxy.map { $0.settings.proxyConfigurations(password: $0.password) } ?? []
-    }
-
     private static func applying(_ proxy: ActiveProxy?, to configuration: URLSessionConfiguration) -> URLSessionConfiguration {
-        configuration.proxyConfigurations = proxyConfigurations(proxy)
+        configuration.proxyConfigurations = proxy.map { $0.settings.proxyConfigurations(password: $0.password) } ?? []
         return configuration
     }
 
