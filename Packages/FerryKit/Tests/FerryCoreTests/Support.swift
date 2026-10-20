@@ -258,6 +258,17 @@ final class Fixture {
     }
 
     var downloads: URL { directory.appendingPathComponent("downloads") }
+
+    /// 已转存、文件列表已保存，但还没开始下载的任务。
+    func makeTransferredJob() async throws -> Job {
+        var job = Job(link: FakeNetdisk.link, password: nil, entries: netdisk.rootEntries(), transferFolder: "/Ferry")
+        try await netdisk.transfer(FakeNetdisk.session, entries: job.entries, to: job.remoteDirectory)
+        job.files = try await netdisk.listFilesRecursively(job.remoteDirectory).map { file in
+            JobFile(remotePath: file.path, relativePath: RemotePath.relativePath(of: file.path, in: job.remoteDirectory)!, size: file.size)
+        }
+        job.phase = .downloading
+        return job
+    }
     var store: JobStore { JobStore(fileURL: directory.appendingPathComponent("jobs.json")) }
 
     static let configuration = DownloadConfiguration(
@@ -270,9 +281,13 @@ final class Fixture {
         checkpointInterval: .milliseconds(20)
     )
 
+    func makeEngine() -> DownloadEngine {
+        DownloadEngine(stateDirectory: stateDirectory, source: FileServerSource(server: server),
+                       configuration: Self.configuration, session: session)
+    }
+
     func makeCoordinator(settings: FerrySettings = FerrySettings(maxConcurrentFiles: 4)) -> JobCoordinator {
-        let engine = DownloadEngine(stateDirectory: stateDirectory,
-                                    source: FileServerSource(server: server), configuration: Self.configuration, session: session)
+        let engine = makeEngine()
         let coordinator = JobCoordinator(engine: engine, store: store, settings: settings, downloadDirectory: downloads,
                                          baseConfiguration: Self.configuration)
         coordinator.netdisk = netdisk

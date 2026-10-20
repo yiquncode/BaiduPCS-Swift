@@ -21,6 +21,9 @@ public struct JobProgress: Sendable, Hashable {
 }
 
 /// 推进任务：建任务子目录 → 转存 → 列出文件 → 下载 → 清理。它也保存任务列表，并在启动时恢复任务。
+///
+/// 同一任务对下载引擎的操作（加入、暂停、继续）按顺序执行，每个操作执行时重新读取任务的当前状态，
+/// 所以暂停和继续交错时，引擎中的状态最终和任务的 `isPaused` 一致。
 @MainActor @Observable
 public final class JobCoordinator {
     /// 新任务在前。
@@ -34,14 +37,27 @@ public final class JobCoordinator {
     public var netdisk: (any Netdisk)?
     /// 启动时任务列表无法读取的说明。界面显示它，用户关闭后清空。
     public private(set) var loadWarning: String?
+    /// `start()` 完成前为 false。在此之前，任务操作等待它完成。
+    public private(set) var isStarted = false
+    /// 正在移除的任务。移除完成前它们仍在 `jobs` 中，但不再接受操作。
+    public private(set) var removingJobs: Set<Job.ID> = []
     @ObservationIgnored public var onJobCompleted: ((Job) -> Void)?
+    /// 测试用：每个文件下载加入引擎之前调用。
+    @ObservationIgnored var willEnqueue: (@MainActor (JobFile) async -> Void)?
 
     @ObservationIgnored private let engine: DownloadEngine
     @ObservationIgnored private let store: JobStore
     @ObservationIgnored private let baseConfiguration: DownloadConfiguration
+    /// 每个任务的转存或收尾任务。
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
+    /// 每个任务最后一个引擎操作。新的操作等它结束后再执行。
+    @ObservationIgnored private var lanes: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var reconciling: Set<UUID> = []
     @ObservationIgnored private var finishing: Set<UUID> = []
+    @ObservationIgnored private var startWaiters: [CheckedContinuation<Void, Never>] = []
     @ObservationIgnored private let logger = Logger(subsystem: "Ferry", category: "jobs")
+    /// 读取任务列表之前不写入，避免覆盖还没读取的文件。
+    @ObservationIgnored private var hasLoaded = false
     /// 任务列表无法读取、也无法备份时为 false：这次启动不写入，保留原文件。
     @ObservationIgnored private var canSave = true
 
@@ -66,6 +82,13 @@ public final class JobCoordinator {
 
     /// 读取任务列表，恢复引擎中的文件下载。调用前要取得下载目录的访问权限。
     public func start() async {
+        guard !hasLoaded else { return }
+        defer {
+            isStarted = true
+            let waiters = startWaiters
+            startWaiters = []
+            for waiter in waiters { waiter.resume() }
+        }
         var loaded: [Job]
         var isLoaded = true
         do {
@@ -85,11 +108,16 @@ public final class JobCoordinator {
             loaded[index].phase = .failed(.transfer)
             loaded[index].error = "应用退出时转存没有完成。"
         }
-        jobs = loaded
+        // 启动完成前添加的任务排在前面。
+        jobs += loaded
+        hasLoaded = true
 
         await engine.updateConfiguration(settings.downloadConfiguration(base: baseConfiguration))
         // 任务列表读不出来时，不知道引擎中的文件下载属于谁。不恢复它们，也不取消它们。
-        guard isLoaded else { return }
+        guard isLoaded else {
+            save()
+            return
+        }
         let restored: [DownloadSnapshot]
         do {
             restored = try await engine.restore()
@@ -97,22 +125,30 @@ public final class JobCoordinator {
             logger.error("cannot restore downloads: \(error.localizedDescription)")
             restored = []
         }
-        let known = Set(jobs.flatMap { $0.files.map(\.id) })
+        var finished: [String] = []
         for snapshot in restored {
-            if known.contains(snapshot.id) {
-                downloads[snapshot.id] = snapshot
-            } else {
+            guard let (jobIndex, fileIndex) = locate(snapshot.id) else {
                 await engine.cancel(id: snapshot.id)
+                continue
+            }
+            if case .completed(let url) = snapshot.state {
+                // 上次完成后、写入任务列表前应用退出了。
+                if jobs[jobIndex].files[fileIndex].localURL == nil {
+                    jobs[jobIndex].files[fileIndex].localURL = url
+                }
+                finished.append(snapshot.id)
+            } else {
+                downloads[snapshot.id] = snapshot
             }
         }
-        // 文件列表已保存、但还没交给引擎的文件下载。
+        save()
+        // 完成状态已写入任务列表，引擎不用再保留它们。
+        for id in finished {
+            await engine.cancel(id: id)
+        }
+        // 文件列表已保存、但还没交给引擎的文件下载重新加入；任务没暂停时，暂停的文件下载继续。
         for job in jobs where job.phase == .downloading {
-            let missing = job.files.filter { !$0.isCompleted && downloads[$0.id] == nil }
-            do {
-                try await enqueue(missing, paused: job.isPaused)
-            } catch {
-                fail(job.id, step: .download, error)
-            }
+            await serially(job.id) { await self.continueDownloads(job.id, resumingFailed: false) }
             evaluate(job.id)
         }
         save()
@@ -122,9 +158,15 @@ public final class JobCoordinator {
         loadWarning = nil
     }
 
-    /// 应用退出前调用：停止下载并保存进度。
+    /// 应用退出前调用：停止下载，把已完成的文件下载记入任务，然后保存。
     public func shutdown() async {
         await engine.shutdown()
+        for snapshot in await engine.snapshots() {
+            if case .completed(let url) = snapshot.state, let (jobIndex, fileIndex) = locate(snapshot.id),
+               jobs[jobIndex].files[fileIndex].localURL == nil {
+                jobs[jobIndex].files[fileIndex].localURL = url
+            }
+        }
         save()
     }
 
@@ -146,23 +188,25 @@ public final class JobCoordinator {
     }
 
     public func pause(_ id: Job.ID) async {
-        guard let job = job(id), job.phase == .downloading, !job.isPaused else { return }
+        await waitUntilStarted()
+        guard let job = activeJob(id), job.phase == .downloading, !job.isPaused else { return }
         update(id) { $0.isPaused = true }
         save()
-        for file in job.files where !file.isCompleted {
-            await engine.pause(id: file.id)
-        }
+        await serially(id) { await self.pauseDownloads(id) }
     }
 
     public func resume(_ id: Job.ID) async {
-        guard let job = job(id), job.phase == .downloading, job.isPaused else { return }
+        await waitUntilStarted()
+        guard let job = activeJob(id), job.phase == .downloading, job.isPaused else { return }
         update(id) { $0.isPaused = false }
         save()
-        await continueDownloads(of: job)
+        await serially(id) { await self.continueDownloads(id, resumingFailed: false) }
+        evaluate(id)
     }
 
     public func retry(_ id: Job.ID) async {
-        guard let job = job(id), case .failed(let step) = job.phase else { return }
+        await waitUntilStarted()
+        guard let job = activeJob(id), case .failed(let step) = job.phase else { return }
         switch step {
         case .transfer:
             update(id) {
@@ -180,22 +224,31 @@ public final class JobCoordinator {
                 $0.isPaused = false
             }
             save()
-            await continueDownloads(of: job)
+            await serially(id) { await self.continueDownloads(id, resumingFailed: true) }
+            evaluate(id)
         }
     }
 
     /// 移除任务，取消没有完成的文件下载。已下载的文件留在本地。
     public func remove(_ id: Job.ID) async {
-        guard let job = job(id) else { return }
+        await waitUntilStarted()
+        guard job(id) != nil, !removingJobs.contains(id) else { return }
+        removingJobs.insert(id)
+        defer { removingJobs.remove(id) }
         if let task = tasks.removeValue(forKey: id) {
             task.cancel()
             await task.value
         }
-        jobs.removeAll { $0.id == id }
-        save()
+        // 等已开始的引擎操作结束。之后的操作看到任务正在移除，不再修改引擎。
+        await serially(id) {}
+        lanes[id] = nil
+        // 转存可能在结束前写入了文件列表，所以重新读取任务。
+        guard let job = job(id) else { return }
         for file in job.files {
             await engine.cancel(id: file.id)
         }
+        jobs.removeAll { $0.id == id }
+        save()
         if settings.cleanupAfterDownload, !job.isCleanedUp, let netdisk {
             do {
                 try await netdisk.delete(paths: [job.remoteDirectory])
@@ -223,12 +276,13 @@ public final class JobCoordinator {
 
     private func startTransfer(_ id: Job.ID, session: ShareSession?, removingExisting: Bool) {
         tasks[id] = Task {
+            await waitUntilStarted()
             await transfer(id, session: session, removingExisting: removingExisting)
         }
     }
 
     private func transfer(_ id: Job.ID, session: ShareSession?, removingExisting: Bool) async {
-        guard let job = job(id) else { return }
+        guard let job = activeJob(id) else { return }
         do {
             guard let netdisk else { throw CoordinatorError.notLoggedIn }
             if removingExisting {
@@ -252,6 +306,7 @@ public final class JobCoordinator {
                 warning = "勾选的目录中没有文件，不需要下载。"
             }
             try Task.checkCancellation()
+            guard activeJob(id) != nil else { return }
             let files = try Self.jobFiles(for: remoteFiles, in: job.remoteDirectory)
             update(id) {
                 $0.files = files
@@ -260,12 +315,7 @@ public final class JobCoordinator {
                 $0.warning = warning
             }
             save()
-            do {
-                try await enqueue(files, paused: false)
-            } catch {
-                fail(id, step: .download, error)
-                return
-            }
+            await serially(id) { await self.continueDownloads(id, resumingFailed: false) }
             evaluate(id)
         } catch {
             guard !Task.isCancelled, !(error is CancellationError) else { return }
@@ -306,37 +356,75 @@ public final class JobCoordinator {
 
     // MARK: - 下载
 
-    private func enqueue(_ files: [JobFile], paused: Bool) async throws {
-        for file in files {
-            guard let destination = LocalPath.destination(for: file.relativePath, in: downloadDirectory) else {
-                throw TransferCheckError.unsafePath(file.relativePath)
+    /// 在任务的引擎操作队列中执行 `operation`，等它结束后返回。
+    private func serially(_ id: Job.ID, _ operation: @escaping @MainActor () async -> Void) async {
+        let previous = lanes[id]
+        let task = Task {
+            await previous?.value
+            await operation()
+        }
+        lanes[id] = task
+        await task.value
+    }
+
+    /// 让引擎中的文件下载和任务一致：不在引擎中的加入引擎；任务没暂停时，暂停的继续。
+    /// `resumingFailed` 为 true 时失败的也继续（重试）。每处理一个文件都重新读取任务，任务暂停、移除或失败时停止。
+    private func continueDownloads(_ id: Job.ID, resumingFailed: Bool) async {
+        guard let files = activeJob(id)?.files else { return }
+        for file in files where !file.isCompleted {
+            guard !Task.isCancelled, let job = activeJob(id), job.phase == .downloading else { return }
+            let state = await engine.snapshot(id: file.id)?.state
+            do {
+                switch state {
+                case nil:
+                    try await enqueue(file, of: id)
+                case .paused where !job.isPaused:
+                    await engine.resume(id: file.id)
+                case .failed where resumingFailed && !job.isPaused:
+                    await engine.resume(id: file.id)
+                default:
+                    continue
+                }
+            } catch {
+                fail(id, step: .download, error)
+                return
             }
-            try await engine.enqueue(DownloadRequest(
-                id: file.id,
-                destination: destination,
-                expectedSize: file.size,
-                context: BaiduDownloadSource.context(forRemotePath: file.remotePath)
-            ))
-            if paused {
-                await engine.pause(id: file.id)
-            }
+            await refreshSnapshot(file.id)
         }
     }
 
-    /// 继续没有完成的文件下载：引擎中的从断点继续，不在引擎中的重新加入。
-    private func continueDownloads(of job: Job) async {
-        var missing: [JobFile] = []
-        for file in job.files where !file.isCompleted {
-            if downloads[file.id] == nil {
-                missing.append(file)
-            } else {
-                await engine.resume(id: file.id)
-            }
+    /// 事件稍后才到。先记下引擎的当前状态，随后的 `evaluate` 才不会按旧状态判断。
+    private func refreshSnapshot(_ fileID: String) async {
+        guard let snapshot = await engine.snapshot(id: fileID) else { return }
+        if case .completed = snapshot.state { return }
+        downloads[fileID] = snapshot
+    }
+
+    /// 暂停任务的文件下载。任务在此期间被继续时停止。
+    private func pauseDownloads(_ id: Job.ID) async {
+        guard let files = activeJob(id)?.files else { return }
+        for file in files where !file.isCompleted {
+            guard activeJob(id)?.isPaused == true else { return }
+            await engine.pause(id: file.id)
+            await refreshSnapshot(file.id)
         }
-        do {
-            try await enqueue(missing, paused: false)
-        } catch {
-            fail(job.id, step: .download, error)
+    }
+
+    /// 加入引擎。加入期间任务被暂停时，立即暂停它。
+    private func enqueue(_ file: JobFile, of id: Job.ID) async throws {
+        await willEnqueue?(file)
+        guard activeJob(id) != nil else { return }
+        guard let destination = LocalPath.destination(for: file.relativePath, in: downloadDirectory) else {
+            throw TransferCheckError.unsafePath(file.relativePath)
+        }
+        try await engine.enqueue(DownloadRequest(
+            id: file.id,
+            destination: destination,
+            expectedSize: file.size,
+            context: BaiduDownloadSource.context(forRemotePath: file.remotePath)
+        ))
+        if activeJob(id)?.isPaused ?? false {
+            await engine.pause(id: file.id)
         }
     }
 
@@ -347,12 +435,18 @@ public final class JobCoordinator {
             downloads[snapshot.id] = snapshot
         case .stateChanged(let snapshot):
             guard let (jobIndex, fileIndex) = locate(snapshot.id) else { return }
-            downloads[snapshot.id] = snapshot
-            if case .completed(let url) = snapshot.state, jobs[jobIndex].files[fileIndex].localURL == nil {
-                jobs[jobIndex].files[fileIndex].localURL = url
-                save()
+            let jobID = jobs[jobIndex].id
+            if case .completed(let url) = snapshot.state {
+                if jobs[jobIndex].files[fileIndex].localURL == nil {
+                    jobs[jobIndex].files[fileIndex].localURL = url
+                    save()
+                }
+                // 完成状态写入任务列表后，引擎才删除这个文件下载的状态。
+                let fileID = snapshot.id
+                Task { await engine.cancel(id: fileID) }
             }
-            evaluate(jobs[jobIndex].id)
+            downloads[snapshot.id] = snapshot
+            evaluate(jobID)
         case .removed(let id):
             downloads[id] = nil
         }
@@ -360,7 +454,7 @@ public final class JobCoordinator {
 
     /// 根据文件下载的状态更新任务的阶段。
     private func evaluate(_ id: Job.ID) {
-        guard let job = job(id), job.phase == .downloading, !finishing.contains(id) else { return }
+        guard let job = activeJob(id), job.phase == .downloading, !finishing.contains(id) else { return }
         let pending = job.files.filter { !$0.isCompleted }
         if pending.isEmpty {
             finish(id)
@@ -368,7 +462,13 @@ public final class JobCoordinator {
         }
         guard !job.isPaused else { return }
         let states = pending.compactMap { downloads[$0.id]?.state }
-        guard !states.contains(where: { $0 == .queued || $0 == .running }) else { return }
+        if states.contains(.paused) {
+            // 任务没暂停，文件下载却暂停了（例如启动时恢复为暂停）。让它们继续，否则任务一直停在“下载中”。
+            reconcile(id)
+            return
+        }
+        // 还有文件下载没加入引擎（例如正在逐个加入）时，结果还没确定。
+        guard states.count == pending.count, !states.contains(where: { $0 == .queued || $0 == .running }) else { return }
         let failure = states.lazy.compactMap { state -> DownloadFailure? in
             if case .failed(let failure) = state { failure } else { nil }
         }.first
@@ -377,12 +477,21 @@ public final class JobCoordinator {
         }
     }
 
+    private func reconcile(_ id: Job.ID) {
+        guard reconciling.insert(id).inserted else { return }
+        Task {
+            await serially(id) { await self.continueDownloads(id, resumingFailed: false) }
+            reconciling.remove(id)
+            evaluate(id)
+        }
+    }
+
     /// 全部文件下载完成后，按设置清理，然后标记为已完成。清理失败只记录警告。
     private func finish(_ id: Job.ID) {
         finishing.insert(id)
         tasks[id] = Task {
             defer { finishing.remove(id) }
-            if settings.cleanupAfterDownload, let job = job(id), !job.isCleanedUp {
+            if settings.cleanupAfterDownload, let job = activeJob(id), !job.isCleanedUp {
                 do {
                     guard let netdisk else { throw CoordinatorError.notLoggedIn }
                     try await netdisk.delete(paths: [job.remoteDirectory])
@@ -392,7 +501,7 @@ public final class JobCoordinator {
                     update(id) { $0.warning = "没有删除网盘中的转存文件：" + Self.message(for: error) }
                 }
             }
-            guard self.job(id) != nil else { return }
+            guard !Task.isCancelled, activeJob(id) != nil else { return }
             update(id) {
                 $0.phase = .completed
                 $0.isPaused = false
@@ -406,8 +515,13 @@ public final class JobCoordinator {
 
     // MARK: - 辅助
 
+    private func waitUntilStarted() async {
+        guard !isStarted else { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
     private func fail(_ id: Job.ID, step: Job.Step, _ error: any Error) {
-        guard job(id) != nil else { return }
+        guard activeJob(id) != nil else { return }
         update(id) {
             $0.phase = .failed(step)
             $0.error = Self.message(for: error)
@@ -417,6 +531,11 @@ public final class JobCoordinator {
 
     private func job(_ id: Job.ID) -> Job? {
         jobs.first { $0.id == id }
+    }
+
+    /// 存在且没有正在移除的任务。
+    private func activeJob(_ id: Job.ID) -> Job? {
+        removingJobs.contains(id) ? nil : job(id)
     }
 
     private func update(_ id: Job.ID, _ body: (inout Job) -> Void) {
@@ -434,7 +553,7 @@ public final class JobCoordinator {
     }
 
     private func save() {
-        guard canSave else { return }
+        guard hasLoaded, canSave else { return }
         do {
             try store.save(jobs)
         } catch {

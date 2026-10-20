@@ -194,7 +194,7 @@ import Testing
         await second.start()
 
         #expect(second.job(interrupted.id)?.phase == .failed(.transfer))
-        #expect(second.job(job.id)?.phase == .downloading)
+        #expect([.downloading, .completed].contains(second.job(job.id)?.phase))
         try await second.waitForPhase(.completed, of: job.id)
         #expect(fixture.contents("a.bin") == fixture.netdisk.data(at: job.remoteDirectory + "/a.bin"))
         let ranges = fixture.server.log.filter { $0 == job.remoteDirectory + "/a.bin" }
