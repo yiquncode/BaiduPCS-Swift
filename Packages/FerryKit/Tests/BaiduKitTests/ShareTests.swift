@@ -160,31 +160,19 @@ extension StubbedNetworkTests {
             range.map { ($0, "f\($0).bin", "\(directory)/f\($0).bin", false, $0) }
         }
 
-        @Test func rootListingPagesUntilShortPage() async throws {
-            let client = Fixture.client { request in
-                switch request.query["page"] {
-                case "1": .json(Fixture.listJSON(Self.entries(1...100)))
-                case "2": .json(Fixture.listJSON(Self.entries(101...103)))
-                default: .json(#"{"errno":0,"list":[]}"#)
-                }
-            }
+        @Test func rootListingSendsOneRequestWithoutPaging() async throws {
+            let client = Fixture.client { _ in .json(Fixture.listJSON(Self.entries(1...150))) }
             let entries = try await client.listShare(Fixture.session())
-            #expect(entries.count == 103)
+            #expect(entries.count == 150)
             #expect(entries.allSatisfy { $0.relativeDirectory.isEmpty })
 
             let requests = Stub.shared.requests(path: "/share/list")
-            #expect(requests.map { $0.query["page"] } == ["1", "2"])
+            try #require(requests.count == 1)
             #expect(requests[0].query["root"] == "1")
             #expect(requests[0].query["shorturl"] == "qYZEsSc")
             #expect(requests[0].query["bdstoken"] == "bbbb2222")
-            #expect(requests[0].query["num"] == "100")
-        }
-
-        @Test func rootListingStopsWhenServerIgnoresPaging() async throws {
-            let client = Fixture.client { _ in .json(Fixture.listJSON(Self.entries(1...100))) }
-            let entries = try await client.listShare(Fixture.session())
-            #expect(entries.count == 100)
-            #expect(Stub.shared.requests.count == 2)
+            #expect(requests[0].query["page"] == nil)
+            #expect(requests[0].query["num"] == nil)
         }
 
         @Test func rootListingReportsVerification() async {

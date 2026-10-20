@@ -101,21 +101,18 @@ extension BaiduClient {
 
     private static let sharePageSize = 100
 
+    /// 与参考实现一致，只请求一次，不发送 page 和 num。实测服务端忽略根目录的 page。
     private func listShareRoot(_ session: ShareSession) async throws -> [ShareEntry] {
-        // 参考实现不翻页。这里加 page/num：服务端忽略它们时，本页不足一页或出现重复条目就停止。
-        try await paginate(pageSize: Self.sharePageSize) { page in
-            let url = URLEncoding.url("\(Host.pan)/share/list", [
-                ("bdstoken", session.bdstoken), ("root", "1"), ("web", "5"), ("app_id", Host.panAppID),
-                ("shorturl", session.link.surl), ("channel", "chunlei"),
-                ("page", String(page)), ("num", String(Self.sharePageSize)),
-            ])
-            let request = BaiduRequest(url: url, endpoint: .shareList, cookies: cookies(adding: session.cookies))
-            // 没有校验提取码就列需要提取码的分享时，服务端返回 -9 或 9019。
-            let json = try await panJSON(request) { errno in
-                session.password == nil && [-9, 9019].contains(errno) ? .passwordRequired : nil
-            }
-            return (Self.entries(json["list"], in: ""), nil)
+        let url = URLEncoding.url("\(Host.pan)/share/list", [
+            ("bdstoken", session.bdstoken), ("root", "1"), ("web", "5"), ("app_id", Host.panAppID),
+            ("shorturl", session.link.surl), ("channel", "chunlei"),
+        ])
+        let request = BaiduRequest(url: url, endpoint: .shareList, cookies: cookies(adding: session.cookies))
+        // 没有校验提取码就列需要提取码的分享时，服务端返回 -9 或 9019。
+        let json = try await panJSON(request) { errno in
+            session.password == nil && [-9, 9019].contains(errno) ? .passwordRequired : nil
         }
+        return Self.entries(json["list"], in: "")
     }
 
     func listShareDirectory(_ session: ShareSession, directory: ShareEntry, method: ShareDirectoryMethod) async throws -> [ShareEntry] {
