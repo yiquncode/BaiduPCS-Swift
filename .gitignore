@@ -2,4 +2,4 @@
 .swiftpm/
 DerivedData/
 xcuserdata/
-.claude/settings.local.json
+.claude/
