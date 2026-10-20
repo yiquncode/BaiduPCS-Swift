@@ -159,9 +159,9 @@ struct AddLinkView: View {
 
     private var folderPicker: some View {
         Picker("保存到", selection: destination) {
-            folderLabel(model.currentFolder.url).tag(Destination.settings)
+            FolderLabel(url: model.currentFolder.url).tag(Destination.settings)
             ForEach(chosenFolders, id: \.self) { folder in
-                folderLabel(folder.url).tag(Destination.chosen(folder))
+                FolderLabel(url: folder.url).tag(Destination.chosen(folder))
             }
             Divider()
             Text("其他…").tag(Destination.other)
@@ -169,10 +169,6 @@ struct AddLinkView: View {
         .pickerStyle(.menu)
         .fixedSize()
         .help((selectedFolder ?? model.currentFolder).url.path(percentEncoded: false))
-    }
-
-    private func folderLabel(_ url: URL) -> some View {
-        Label(FileManager.default.displayName(atPath: url.path(percentEncoded: false)), systemImage: "folder")
     }
 
     /// 选择的目录加入菜单并选中。它和菜单中已有的目录是同一位置时，选中已有的那一项。

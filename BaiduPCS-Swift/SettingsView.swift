@@ -26,6 +26,30 @@ private struct DownloadSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var isChoosingDirectory = false
 
+    /// “下载目录”菜单中的一项。
+    private enum DirectoryChoice: Hashable {
+        case downloads
+        case chosen
+        /// 打开面板选择目录，不改变当前选择。
+        case other
+    }
+
+    private var directoryChoice: Binding<DirectoryChoice> {
+        Binding {
+            model.usesDefaultDownloadDirectory ? .downloads : .chosen
+        } set: { choice in
+            switch choice {
+            case .downloads:
+                // 同时清除无法访问的旧目录的 bookmark 和提示。
+                if model.settings.downloadDirectoryBookmark != nil {
+                    model.useDefaultDownloadDirectory()
+                }
+            case .chosen: break
+            case .other: isChoosingDirectory = true
+            }
+        }
+    }
+
     /// 两项中有一项大于 1 时，非会员账号会被限速。
     private var usesMultipleConnections: Bool {
         model.settings.maxConcurrentFiles > 1 || model.settings.connectionsPerFile > 1
@@ -35,23 +59,19 @@ private struct DownloadSettingsView: View {
         @Bindable var model = model
         Form {
             Section {
-                LabeledContent("下载目录") {
-                    HStack {
-                        Label(FileManager.default.displayName(atPath: model.downloadDirectory.path(percentEncoded: false)),
-                              systemImage: "folder")
-                            .help(model.downloadDirectory.path(percentEncoded: false))
-                        Button("选择…") { isChoosingDirectory = true }
+                // 和 Safari 的“文件下载位置”相同：系统的“下载”目录、选择的目录和“其他…”。
+                Picker("下载目录", selection: directoryChoice) {
+                    FolderLabel(url: AppModel.defaultDownloadDirectory).tag(DirectoryChoice.downloads)
+                    if !model.usesDefaultDownloadDirectory {
+                        FolderLabel(url: model.downloadDirectory).tag(DirectoryChoice.chosen)
                     }
+                    Divider()
+                    Text("其他…").tag(DirectoryChoice.other)
                 }
+                .help(model.downloadDirectory.path(percentEncoded: false))
                 if let problem = model.downloadDirectoryProblem {
                     Label(problem, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
-                }
-                if model.settings.downloadDirectoryBookmark != nil {
-                    HStack {
-                        Spacer()
-                        Button("使用“下载”目录") { model.useDefaultDownloadDirectory() }
-                    }
                 }
             }
 
@@ -82,6 +102,15 @@ private struct DownloadSettingsView: View {
                 model.chooseDownloadDirectory(url)
             }
         }
+    }
+}
+
+/// 目录菜单中的一项：目录的显示名称和文件夹图标。
+struct FolderLabel: View {
+    let url: URL
+
+    var body: some View {
+        Label(FileManager.default.displayName(atPath: url.path(percentEncoded: false)), systemImage: "folder")
     }
 }
 

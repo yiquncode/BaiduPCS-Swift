@@ -50,7 +50,12 @@ final class AppModel {
     private static let settingsKey = "settings"
 
     /// 沙盒中的“下载”目录是指向用户“下载”目录的符号链接。解析后显示和保存真实路径。
-    private static var defaultDownloadDirectory: URL { URL.downloadsDirectory.resolvingSymlinksInPath() }
+    static var defaultDownloadDirectory: URL { URL.downloadsDirectory.resolvingSymlinksInPath() }
+
+    /// 正在使用系统的“下载”目录：没有选择过目录、选择的就是它，或之前选择的目录无法访问。
+    var usesDefaultDownloadDirectory: Bool {
+        downloadDirectory.standardizedFileURL.path == Self.defaultDownloadDirectory.standardizedFileURL.path
+    }
 
     init() {
         let settings = UserDefaults.standard.data(forKey: Self.settingsKey)
