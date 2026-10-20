@@ -11,6 +11,8 @@ struct FerryApp: App {
                 .environment(appDelegate.model)
         }
         .commands {
+            SidebarCommands()
+            InspectorCommands()
             FerryCommands(model: appDelegate.model)
         }
 
@@ -24,6 +26,7 @@ struct FerryApp: App {
 private struct FerryCommands: Commands {
     let model: AppModel
     @Environment(\.openWindow) private var openWindow
+    @FocusedValue(\.jobSelection) private var selection
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -34,6 +37,10 @@ private struct FerryCommands: Commands {
             .keyboardShortcut("n")
         }
         CommandMenu("任务") {
+            // 主窗口不是当前窗口时没有选中的任务，这些操作都不可用。
+            JobActionsMenu(jobs: selection?.jobs ?? [], showsUnavailable: true) { selection?.onRemove($0) }
+                .environment(model)
+            Divider()
             let jobs = model.coordinator.jobs
             Button("全部暂停") { model.pauseAll(jobs) }
                 .disabled(model.pausableJobs(in: jobs).isEmpty)

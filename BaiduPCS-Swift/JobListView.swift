@@ -31,9 +31,13 @@ struct JobListView: View {
         } else {
             List(jobs, selection: $selection) { job in
                 JobRow(job: job)
-                    .contextMenu {
-                        JobActions(job: job, onRemove: { onRemove([job]) })
-                    }
+            }
+            // 右键点在选中的任务上时作用于全部选中的任务，否则只作用于点到的任务。
+            .contextMenu(forSelectionType: Job.ID.self) { ids in
+                JobActionsMenu(jobs: jobs.filter { ids.contains($0.id) }, onRemove: onRemove)
+            } primaryAction: { ids in
+                // 双击或回车：在 Finder 中显示已下载的文件。
+                model.perform(.reveal, on: model.jobs(in: jobs.filter { ids.contains($0.id) }, allowing: .reveal))
             }
             .onDeleteCommand {
                 onRemove(jobs.filter { selection.contains($0.id) })
@@ -76,27 +80,54 @@ private struct JobRow: View {
     }
 }
 
-/// 任务的右键菜单。
-private struct JobActions: View {
-    let job: Job
-    let onRemove: () -> Void
+/// 对一组任务的操作，用于右键菜单和菜单栏的“任务”菜单。每个操作只作用于其中可以执行它的任务。
+///
+/// 按 HIG，右键菜单隐藏不可用的操作；菜单栏菜单保留它们并显示为不可用。
+struct JobActionsMenu: View {
+    let jobs: [Job]
+    /// 为 true 时显示不可用的操作（菜单栏菜单）。
+    var showsUnavailable = false
+    /// 请求移除任务。调用方决定是否先确认。
+    let onRemove: ([Job]) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let action = job.primaryAction, action != .reveal {
-            JobActionButton(job: job, action: action)
+        ForEach(JobAction.allCases, id: \.self) { action in
+            let targets = model.jobs(in: jobs, allowing: action)
+            if showsUnavailable || !targets.isEmpty {
+                Button {
+                    model.perform(action, on: targets)
+                } label: {
+                    Label(action.title, systemImage: action.systemImage)
+                }
+                .disabled(targets.isEmpty)
+            }
         }
-        if !job.revealURLs.isEmpty {
-            JobActionButton(job: job, action: .reveal)
+        if showsUnavailable || !jobs.isEmpty {
+            Divider()
+            Button(role: .destructive) {
+                onRemove(jobs)
+            } label: {
+                Label("移除…", systemImage: "xmark")
+            }
+            .disabled(!jobs.contains { model.canOperate(on: $0) })
         }
-        Divider()
-        Button(role: .destructive, action: onRemove) { Label("移除", systemImage: "xmark") }
-            .disabled(!model.canOperate(on: job))
     }
 }
 
+/// 主窗口中选中的任务。菜单栏的“任务”菜单通过它操作选中的任务。
+struct JobSelection {
+    let jobs: [Job]
+    /// 请求移除任务。主窗口决定是否先确认。
+    let onRemove: ([Job]) -> Void
+}
+
+extension FocusedValues {
+    @Entry var jobSelection: JobSelection?
+}
+
 /// 对一个任务的操作。
-enum JobAction {
+enum JobAction: CaseIterable {
     case pause
     case resume
     case retry
@@ -132,6 +163,16 @@ extension Job {
         }
     }
 
+    /// 任务的阶段是否允许 `action`。不考虑启动恢复和移除（见 `AppModel.canOperate(on:)`）。
+    func allows(_ action: JobAction) -> Bool {
+        switch action {
+        case .pause: phase == .downloading && !isPaused
+        case .resume: phase == .downloading && isPaused
+        case .retry: primaryAction == .retry
+        case .reveal: !revealURLs.isEmpty
+        }
+    }
+
     /// 标题或任意文件名包含 `text`，不区分大小写。
     func matches(_ text: String) -> Bool {
         title.localizedCaseInsensitiveContains(text) || files.contains { $0.name.localizedCaseInsensitiveContains(text) }
@@ -150,12 +191,7 @@ struct JobActionButton: View {
 
     var body: some View {
         Button {
-            switch action {
-            case .pause: model.pause(job)
-            case .resume: model.resume(job)
-            case .retry: model.retry(job)
-            case .reveal: model.reveal(job)
-            }
+            model.perform(action, on: [job])
         } label: {
             Label(action.title, systemImage: action.systemImage)
         }

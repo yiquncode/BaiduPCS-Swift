@@ -55,6 +55,7 @@ struct MainView: View {
                 }
         }
         .frame(minWidth: 640, minHeight: 400)
+        .focusedSceneValue(\.jobSelection, JobSelection(jobs: selectedJobs, onRemove: requestRemoval))
         .confirmationDialog(
             removalTitle,
             isPresented: Binding(get: { !pendingRemoval.isEmpty }, set: { if !$0 { pendingRemoval = [] } }),

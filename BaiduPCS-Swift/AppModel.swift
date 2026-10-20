@@ -265,14 +265,29 @@ final class AppModel {
         Task { await coordinator.resume(job.id) }
     }
 
+    /// 其中可以执行 `action` 的任务。
+    func jobs(in jobs: [Job], allowing action: JobAction) -> [Job] {
+        jobs.filter { $0.allows(action) && canOperate(on: $0) }
+    }
+
     /// 其中下载中且未暂停、可以暂停的任务。
     func pausableJobs(in jobs: [Job]) -> [Job] {
-        jobs.filter { $0.phase == .downloading && !$0.isPaused && canOperate(on: $0) }
+        self.jobs(in: jobs, allowing: .pause)
     }
 
     /// 其中已暂停、可以继续的任务。
     func resumableJobs(in jobs: [Job]) -> [Job] {
-        jobs.filter { $0.phase == .downloading && $0.isPaused && canOperate(on: $0) }
+        self.jobs(in: jobs, allowing: .resume)
+    }
+
+    /// 调用方先用 `jobs(in:allowing:)` 筛选任务。
+    func perform(_ action: JobAction, on jobs: [Job]) {
+        switch action {
+        case .pause: jobs.forEach(pause)
+        case .resume: jobs.forEach(resume)
+        case .retry: jobs.forEach(retry)
+        case .reveal: NSWorkspace.shared.activateFileViewerSelecting(jobs.flatMap(\.revealURLs))
+        }
     }
 
     func pauseAll(_ jobs: [Job]) {
@@ -289,10 +304,6 @@ final class AppModel {
 
     func remove(_ job: Job) {
         Task { await coordinator.remove(job.id) }
-    }
-
-    func reveal(_ job: Job) {
-        NSWorkspace.shared.activateFileViewerSelecting(job.revealURLs)
     }
 
     // MARK: - 通知
