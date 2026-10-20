@@ -107,6 +107,8 @@ struct WebLoginView: View {
 /// 登录页的网页和 Cookie 检查。Ferry 不向页面注入脚本，不读取页面内容，只读取数据存储中的 Cookie。
 @Observable
 final class WebLoginSession: NSObject {
+    /// 主页面开始加载，还没有显示内容。不用 `WKWebView.isLoading`：它要等页面的所有子资源结束，
+    /// 百度的页面上有请求一直没有响应时，它一直是 true。
     private(set) var isLoading = false
     /// 网页加载失败（网络错误）时的说明。
     private(set) var loadError: String?
@@ -125,7 +127,8 @@ final class WebLoginSession: NSObject {
     @ObservationIgnored private var bdussSeenAt: ContinuousClock.Instant?
     @ObservationIgnored private var diskMainLoadedAt: ContinuousClock.Instant?
     @ObservationIgnored private var failedURL: URL?
-    @ObservationIgnored private var loadingObservation: NSKeyValueObservation?
+    /// 最近开始的主页面导航。被取代的导航结束时，不改变 `isLoading`。
+    @ObservationIgnored private var currentNavigation: WKNavigation?
 
     /// 只记录 Cookie 的名字、域名和属性，不记录值。用 `log show --info --predicate 'category == "WebLogin"'` 查看。
     private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Ferry", category: "WebLogin")
@@ -154,9 +157,6 @@ final class WebLoginSession: NSObject {
         super.init()
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        loadingObservation = webView.observe(\.isLoading) { [weak self] webView, _ in
-            MainActor.assumeIsolated { self?.isLoading = webView.isLoading }
-        }
     }
 
     func start() {
@@ -257,6 +257,12 @@ extension WebLoginSession: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         loadError = nil
         failedURL = nil
+        currentNavigation = navigation
+        isLoading = true
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        endLoading(navigation)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -264,15 +270,25 @@ extension WebLoginSession: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+        endLoading(navigation)
         show(error)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        endLoading(navigation)
         show(error)
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        currentNavigation = nil
+        isLoading = false
         loadError = "网页意外停止。"
+    }
+
+    private func endLoading(_ navigation: WKNavigation?) {
+        guard navigation === currentNavigation else { return }
+        currentNavigation = nil
+        isLoading = false
     }
 
     private func show(_ error: any Error) {
