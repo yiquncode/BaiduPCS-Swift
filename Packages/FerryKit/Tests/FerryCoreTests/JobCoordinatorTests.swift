@@ -224,6 +224,45 @@ import Testing
         try await second.waitForPhase(.completed, of: job.id)
     }
 
+    @Test func unreadableJobListKeepsDownloadsUntouched() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(400_000)])
+        let first = fixture.makeCoordinator()
+        await first.start()
+        fixture.server.setStalled(true)
+        let job = first.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        try await waitUntil("partial progress") {
+            guard let job = first.job(job.id), !job.files.isEmpty else { return false }
+            return first.progress(of: job).receivedBytes > 0
+        }
+        await first.shutdown()
+        fixture.server.setStalled(false)
+        let saved = try Data(contentsOf: fixture.store.fileURL)
+        try Data("{".utf8).write(to: fixture.store.fileURL)
+        let stateFiles = try fixture.stateFiles()
+        #expect(!stateFiles.isEmpty)
+        let requests = fixture.server.log.count
+
+        let second = fixture.makeCoordinator()
+        await second.start()
+        #expect(second.jobs.isEmpty)
+        #expect(second.loadWarning?.contains("jobs.json.corrupt-") == true)
+        let backups = try FileManager.default.contentsOfDirectory(atPath: fixture.directory.path)
+            .filter { $0.hasPrefix("jobs.json.corrupt-") }
+        #expect(backups.count == 1)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(try fixture.stateFiles() == stateFiles)
+        #expect(fixture.server.log.count == requests)
+        await second.shutdown()
+
+        // 用户把备份改回原名后，下载从断点继续。
+        try saved.write(to: fixture.store.fileURL)
+        let third = fixture.makeCoordinator()
+        await third.start()
+        #expect(third.loadWarning == nil)
+        try await third.waitForPhase(.completed, of: job.id)
+        #expect(fixture.contents("a.bin") == fixture.netdisk.data(at: job.remoteDirectory + "/a.bin"))
+    }
+
     @Test func failsWithoutLogin() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(10)])
         let coordinator = fixture.makeCoordinator()

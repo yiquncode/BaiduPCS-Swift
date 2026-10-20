@@ -20,6 +20,20 @@ public struct FerrySettings: Codable, Sendable, Hashable {
         self.connectionsPerFile = connectionsPerFile
     }
 
+    /// 缺少或无法解码的字段用默认值，一个字段出错不会丢掉其他设置（例如下载目录的 bookmark）。
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func value<T: Decodable>(_ key: CodingKeys) -> T? {
+            (try? container.decodeIfPresent(T.self, forKey: key)) ?? nil
+        }
+        let defaults = FerrySettings()
+        downloadDirectoryBookmark = value(.downloadDirectoryBookmark)
+        transferFolder = value(.transferFolder) ?? defaults.transferFolder
+        cleanupAfterDownload = value(.cleanupAfterDownload) ?? defaults.cleanupAfterDownload
+        maxConcurrentFiles = value(.maxConcurrentFiles) ?? defaults.maxConcurrentFiles
+        connectionsPerFile = value(.connectionsPerFile) ?? defaults.connectionsPerFile
+    }
+
     public static let concurrentFilesRange = 1...10
     public static let connectionsRange = 1...16
 

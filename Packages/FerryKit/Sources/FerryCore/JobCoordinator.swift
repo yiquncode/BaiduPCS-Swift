@@ -32,6 +32,8 @@ public final class JobCoordinator {
     public var downloadDirectory: URL
     /// 未登录时为 nil。
     public var netdisk: (any Netdisk)?
+    /// 启动时任务列表无法读取的说明。界面显示它，用户关闭后清空。
+    public private(set) var loadWarning: String?
     @ObservationIgnored public var onJobCompleted: ((Job) -> Void)?
 
     @ObservationIgnored private let engine: DownloadEngine
@@ -40,6 +42,8 @@ public final class JobCoordinator {
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var finishing: Set<UUID> = []
     @ObservationIgnored private let logger = Logger(subsystem: "Ferry", category: "jobs")
+    /// 任务列表无法读取、也无法备份时为 false：这次启动不写入，保留原文件。
+    @ObservationIgnored private var canSave = true
 
     /// - Parameter baseConfiguration: 设置不覆盖的下载参数（分片大小、重试等）。
     public init(engine: DownloadEngine, store: JobStore, settings: FerrySettings, downloadDirectory: URL,
@@ -63,11 +67,19 @@ public final class JobCoordinator {
     /// 读取任务列表，恢复引擎中的文件下载。调用前要取得下载目录的访问权限。
     public func start() async {
         var loaded: [Job]
+        var isLoaded = true
         do {
             loaded = try store.load()
         } catch {
             logger.error("cannot read jobs: \(error.localizedDescription)")
             loaded = []
+            isLoaded = false
+            if let backup = store.moveAsideUnreadableFile() {
+                loadWarning = "无法读取任务列表，原文件已备份为“\(backup.lastPathComponent)”。之前的下载进度保留在磁盘上，这次启动不继续也不删除它们。"
+            } else {
+                canSave = false
+                loadWarning = "无法读取任务列表。这次启动不修改任务列表文件，之前的下载进度保留在磁盘上。"
+            }
         }
         for index in loaded.indices where loaded[index].phase == .transferring {
             loaded[index].phase = .failed(.transfer)
@@ -76,6 +88,8 @@ public final class JobCoordinator {
         jobs = loaded
 
         await engine.updateConfiguration(settings.downloadConfiguration(base: baseConfiguration))
+        // 任务列表读不出来时，不知道引擎中的文件下载属于谁。不恢复它们，也不取消它们。
+        guard isLoaded else { return }
         let restored: [DownloadSnapshot]
         do {
             restored = try await engine.restore()
@@ -102,6 +116,10 @@ public final class JobCoordinator {
             evaluate(job.id)
         }
         save()
+    }
+
+    public func dismissLoadWarning() {
+        loadWarning = nil
     }
 
     /// 应用退出前调用：停止下载并保存进度。
@@ -377,6 +395,7 @@ public final class JobCoordinator {
     }
 
     private func save() {
+        guard canSave else { return }
         do {
             try store.save(jobs)
         } catch {

@@ -53,6 +53,25 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
         isCleanedUp = false
     }
 
+    /// 缺少的字段用默认值，以后新增字段时，旧版本保存的任务列表仍能读取。
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        link = try container.decode(ShareLink.self, forKey: .link)
+        remoteDirectory = try container.decode(String.self, forKey: .remoteDirectory)
+        password = try container.decodeIfPresent(String.self, forKey: .password)
+        entries = try container.decodeIfPresent([ShareEntry].self, forKey: .entries) ?? []
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? Self.title(for: entries)
+        // 不知道任务进行到哪里时，按转存失败处理，用户可以重试。
+        phase = try container.decodeIfPresent(Phase.self, forKey: .phase) ?? .failed(.transfer)
+        files = try container.decodeIfPresent([JobFile].self, forKey: .files) ?? []
+        isPaused = try container.decodeIfPresent(Bool.self, forKey: .isPaused) ?? false
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        warning = try container.decodeIfPresent(String.self, forKey: .warning)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .distantPast
+        isCleanedUp = try container.decodeIfPresent(Bool.self, forKey: .isCleanedUp) ?? false
+    }
+
     public static func shortID(_ id: UUID) -> String {
         String(id.uuidString.prefix(8)).uppercased()
     }
@@ -95,6 +114,15 @@ public struct JobFile: Codable, Sendable, Hashable, Identifiable {
         self.relativePath = relativePath
         self.size = size
         self.localURL = localURL
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        remotePath = try container.decode(String.self, forKey: .remotePath)
+        relativePath = try container.decode(String.self, forKey: .relativePath)
+        size = try container.decodeIfPresent(Int64.self, forKey: .size) ?? 0
+        localURL = try container.decodeIfPresent(URL.self, forKey: .localURL)
     }
 
     public var isCompleted: Bool { localURL != nil }

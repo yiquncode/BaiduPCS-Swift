@@ -1,4 +1,5 @@
 import BaiduKit
+import FerryCore
 import SwiftUI
 
 /// 主窗口：未登录时引导登录，登录后显示任务列表。
@@ -25,8 +26,13 @@ struct ContentView: View {
         }
         .frame(minWidth: 560, minHeight: 360)
         .safeAreaInset(edge: .top, spacing: 0) {
-            if model.isLoginExpired {
-                LoginExpiredBanner()
+            VStack(spacing: 0) {
+                if let warning = model.coordinator.loadWarning {
+                    LoadWarningBanner(message: warning)
+                }
+                if model.isLoginExpired {
+                    LoginExpiredBanner()
+                }
             }
         }
         .toolbar {
@@ -70,6 +76,25 @@ private struct AccountMenu: View {
         } else {
             Button("登录…") { model.isShowingLogin = true }
         }
+    }
+}
+
+private struct LoadWarningBanner: View {
+    let message: String
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+            Text(message)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button("关闭") { model.coordinator.dismissLoadWarning() }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 }
 

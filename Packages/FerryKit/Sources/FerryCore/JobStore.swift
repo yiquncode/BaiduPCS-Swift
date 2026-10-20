@@ -8,7 +8,7 @@ public struct JobStore: Sendable {
         self.fileURL = fileURL
     }
 
-    /// 文件不存在时返回空列表。
+    /// 文件不存在时返回空列表。文件无法读取或解码时抛出错误。
     public func load() throws -> [Job] {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
         return try JSONDecoder().decode([Job].self, from: Data(contentsOf: fileURL))
@@ -19,6 +19,24 @@ public struct JobStore: Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(jobs).write(to: fileURL, options: .atomic)
+    }
+
+    /// 把无法读取的任务列表改名为 `jobs.json.corrupt-<时间戳>`，返回新位置。改名失败时返回 nil。
+    public func moveAsideUnreadableFile(now: Date = .now) -> URL? {
+        let stamp = Int(now.timeIntervalSince1970)
+        let directory = fileURL.deletingLastPathComponent()
+        var backup = directory.appendingPathComponent("\(fileURL.lastPathComponent).corrupt-\(stamp)")
+        var suffix = 1
+        while FileManager.default.fileExists(atPath: backup.path) {
+            backup = directory.appendingPathComponent("\(fileURL.lastPathComponent).corrupt-\(stamp)-\(suffix)")
+            suffix += 1
+        }
+        do {
+            try FileManager.default.moveItem(at: fileURL, to: backup)
+            return backup
+        } catch {
+            return nil
+        }
     }
 }
 

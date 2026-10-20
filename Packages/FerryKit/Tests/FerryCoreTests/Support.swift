@@ -245,12 +245,20 @@ final class Fixture {
     )
 
     func makeCoordinator(settings: FerrySettings = FerrySettings(maxConcurrentFiles: 4)) -> JobCoordinator {
-        let engine = DownloadEngine(stateDirectory: directory.appendingPathComponent("state"),
+        let engine = DownloadEngine(stateDirectory: stateDirectory,
                                     source: FileServerSource(server: server), configuration: Self.configuration, session: session)
         let coordinator = JobCoordinator(engine: engine, store: store, settings: settings, downloadDirectory: downloads,
                                          baseConfiguration: Self.configuration)
         coordinator.netdisk = netdisk
         return coordinator
+    }
+
+    var stateDirectory: URL { directory.appendingPathComponent("state") }
+
+    /// 下载引擎状态目录中的文件名。
+    func stateFiles() throws -> Set<String> {
+        guard FileManager.default.fileExists(atPath: stateDirectory.path) else { return [] }
+        return Set(try FileManager.default.contentsOfDirectory(atPath: stateDirectory.path))
     }
 
     func contents(_ relativePath: String) -> Data? {

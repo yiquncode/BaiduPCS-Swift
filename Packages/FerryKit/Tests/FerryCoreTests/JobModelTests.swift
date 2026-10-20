@@ -64,6 +64,54 @@ import Testing
         #expect(try store.load() == [first, second])
     }
 
+    @Test func decodesJobsWithMissingFields() throws {
+        let json = """
+        [{"id": "ABCDEF12-0000-0000-0000-000000000000", "link": {"surl": "qYZEsSc"}, "remoteDirectory": "/Ferry/ABCDEF12",
+          "files": [{"id": "f1", "remotePath": "/Ferry/ABCDEF12/a.zip", "relativePath": "a.zip"}]}]
+        """
+        let jobs = try JSONDecoder().decode([Job].self, from: Data(json.utf8))
+        let job = try #require(jobs.first)
+        #expect(job.remoteDirectory == "/Ferry/ABCDEF12")
+        #expect(job.phase == .failed(.transfer))
+        #expect(job.entries.isEmpty)
+        #expect(!job.isPaused)
+        #expect(job.files.map(\.relativePath) == ["a.zip"])
+        #expect(job.files.first?.size == 0)
+        #expect(job.files.first?.isCompleted == false)
+    }
+
+    @Test func settingsKeepOtherFieldsWhenOneIsInvalid() throws {
+        let bookmark = Data([1, 2, 3])
+        let json = """
+        {"downloadDirectoryBookmark": "\(bookmark.base64EncodedString())", "maxConcurrentFiles": "many", "futureField": 1}
+        """
+        let settings = try JSONDecoder().decode(FerrySettings.self, from: Data(json.utf8))
+        #expect(settings.downloadDirectoryBookmark == bookmark)
+        #expect(settings.maxConcurrentFiles == 1)
+        #expect(settings.transferFolder == "/Ferry")
+        #expect(try JSONDecoder().decode(FerrySettings.self, from: JSONEncoder().encode(settings)) == settings)
+    }
+
+    @Test func movesUnreadableStoreAside() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("JobStore-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let store = JobStore(fileURL: directory.appendingPathComponent("jobs.json"))
+        let garbage = Data("not json".utf8)
+        try garbage.write(to: store.fileURL)
+        #expect(throws: (any Error).self) { try store.load() }
+
+        let now = Date(timeIntervalSince1970: 1_000)
+        let first = try #require(store.moveAsideUnreadableFile(now: now))
+        #expect(first.lastPathComponent == "jobs.json.corrupt-1000")
+        #expect(try Data(contentsOf: first) == garbage)
+        #expect(!FileManager.default.fileExists(atPath: store.fileURL.path))
+
+        try garbage.write(to: store.fileURL)
+        let second = try #require(store.moveAsideUnreadableFile(now: now))
+        #expect(second.lastPathComponent == "jobs.json.corrupt-1000-1")
+    }
+
     @Test func settingsClampConcurrency() {
         let settings = FerrySettings(maxConcurrentFiles: 0, connectionsPerFile: 99)
         let configuration = settings.downloadConfiguration()
