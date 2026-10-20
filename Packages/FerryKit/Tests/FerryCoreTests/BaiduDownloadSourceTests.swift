@@ -1,14 +1,14 @@
 import BaiduKit
 import DownloadKit
 import Foundation
-import Synchronization
+import os
 import Testing
 @testable import FerryCore
 
 /// 用固定 JSON 回答 `locatedownload`。贴吧接口返回错误，客户端改用默认 uid。
 final class LocateStub: URLProtocol, @unchecked Sendable {
     /// `locatedownload` 的响应体。
-    static let body = Mutex("")
+    static let body = OSAllocatedUnfairLock(initialState: "")
 
     static func makeSession() -> URLSession {
         let configuration = BaiduClient.defaultConfiguration()

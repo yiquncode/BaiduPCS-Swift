@@ -1,5 +1,5 @@
 import Foundation
-import Synchronization
+import os
 
 /// 一次请求或一次文件操作失败的原因。重试策略按它决定怎样处理。
 enum FetchError: Error {
@@ -111,7 +111,7 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
     private let host: String?
     private let onResponse: ResponseHandler
     private let onData: DataHandler
-    private let state = Mutex(State())
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     private init(request: URLRequest, onResponse: @escaping ResponseHandler, onData: @escaping DataHandler) {
         headers = request.allHTTPHeaderFields ?? [:]

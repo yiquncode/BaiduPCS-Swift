@@ -1,5 +1,5 @@
 import Foundation
-import Synchronization
+import os
 
 /// 通用分片下载引擎：队列、并发、断点续传和持久化。它不知道百度，只通过 `DownloadSource` 获取下载链接。
 ///
@@ -371,10 +371,10 @@ struct SpeedMeter {
 
 /// 引擎和进行中的传输任务共用的设置。
 final class SharedConfiguration: Sendable {
-    private let storage: Mutex<DownloadConfiguration>
+    private let storage: OSAllocatedUnfairLock<DownloadConfiguration>
 
     init(_ configuration: DownloadConfiguration) {
-        storage = Mutex(configuration)
+        storage = OSAllocatedUnfairLock(initialState: configuration)
     }
 
     var value: DownloadConfiguration {
@@ -385,7 +385,7 @@ final class SharedConfiguration: Sendable {
 
 /// 把事件发给所有订阅者。
 final class EventBroadcaster: Sendable {
-    private let continuations = Mutex<[UUID: AsyncStream<DownloadEvent>.Continuation]>([:])
+    private let continuations = OSAllocatedUnfairLock<[UUID: AsyncStream<DownloadEvent>.Continuation]>(initialState: [:])
 
     func stream() -> AsyncStream<DownloadEvent> {
         let (stream, continuation) = AsyncStream.makeStream(of: DownloadEvent.self)

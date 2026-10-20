@@ -1,7 +1,7 @@
 import BaiduKit
 import DownloadKit
 import Foundation
-import Synchronization
+import os
 import Testing
 @testable import FerryCore
 
@@ -27,7 +27,7 @@ final class FakeNetdisk: Netdisk {
         var deleteFailures = 0
     }
 
-    private let state = Mutex(State())
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     init(share: [String: Data], emptyDirectories: Set<String> = []) {
         state.withLock {
@@ -129,7 +129,7 @@ final class FakeNetdisk: Netdisk {
 final class FileServer: Sendable {
     let host = "\(UUID().uuidString.lowercased()).test"
     private let netdisk: FakeNetdisk
-    private let state = Mutex<(log: [String], stalled: Bool, failing: Set<String>, stalling: Set<String>)>(([], false, [], []))
+    private let state = OSAllocatedUnfairLock<(log: [String], stalled: Bool, failing: Set<String>, stalling: Set<String>)>(initialState: ([], false, [], []))
 
     init(netdisk: FakeNetdisk) {
         self.netdisk = netdisk
@@ -200,8 +200,8 @@ final class FileServer: Sendable {
 }
 
 final class FileProtocol: URLProtocol, @unchecked Sendable {
-    private static let servers = Mutex<[String: FileServer]>([:])
-    private let stopped = Atomic(false)
+    private static let servers = OSAllocatedUnfairLock<[String: FileServer]>(initialState: [:])
+    private let stopped = OSAllocatedUnfairLock(initialState: false)
 
     static func register(_ server: FileServer, host: String) {
         servers.withLock { $0[host] = server }
@@ -213,7 +213,7 @@ final class FileProtocol: URLProtocol, @unchecked Sendable {
         return URLSession(configuration: configuration)
     }
 
-    var isStopped: Bool { stopped.load(ordering: .acquiring) }
+    var isStopped: Bool { stopped.withLock { $0 } }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -228,7 +228,7 @@ final class FileProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {
-        stopped.store(true, ordering: .releasing)
+        stopped.withLock { $0 = true }
     }
 }
 
@@ -335,7 +335,7 @@ func randomData(_ count: Int) -> Data {
 
 /// 记录打开和关闭的下载目录。`failing` 中的路径无法打开。
 final class FakeFolderAccess: DownloadFolderAccess {
-    private let state = Mutex<(opened: [String], closed: [String], failing: Set<String>)>(([], [], []))
+    private let state = OSAllocatedUnfairLock<(opened: [String], closed: [String], failing: Set<String>)>(initialState: ([], [], []))
 
     var opened: [String] { state.withLock { $0.opened } }
     var closed: [String] { state.withLock { $0.closed } }

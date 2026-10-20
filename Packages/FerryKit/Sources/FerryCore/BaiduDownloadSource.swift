@@ -1,7 +1,7 @@
 import BaiduKit
 import DownloadKit
 import Foundation
-import Synchronization
+import os
 
 /// 用百度网盘的下载链接下载文件。`DownloadRequest.context` 是文件的网盘路径。
 public final class BaiduDownloadSource: DownloadSource {
@@ -11,7 +11,7 @@ public final class BaiduDownloadSource: DownloadSource {
         var attempts: [String: Int] = [:]
     }
 
-    private let state = Mutex(State())
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     public init() {}
 

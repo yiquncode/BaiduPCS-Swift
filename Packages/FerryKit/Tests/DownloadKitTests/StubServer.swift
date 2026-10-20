@@ -1,5 +1,5 @@
 import Foundation
-import Synchronization
+import os
 import Testing
 @testable import DownloadKit
 
@@ -44,7 +44,7 @@ final class StubServer: Sendable {
         var maxActiveFiles = 0
     }
 
-    private let state = Mutex(State())
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     init() {
         StubProtocol.register(self, host: host)
@@ -180,8 +180,8 @@ final class StubServer: Sendable {
 }
 
 final class StubProtocol: URLProtocol, @unchecked Sendable {
-    private static let servers = Mutex<[String: StubServer]>([:])
-    private let stopped = Atomic(false)
+    private static let servers = OSAllocatedUnfairLock<[String: StubServer]>(initialState: [:])
+    private let stopped = OSAllocatedUnfairLock(initialState: false)
 
     static func register(_ server: StubServer, host: String) {
         servers.withLock { $0[host] = server }
@@ -202,7 +202,7 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
         return configuration
     }
 
-    var isStopped: Bool { stopped.load(ordering: .acquiring) }
+    var isStopped: Bool { stopped.withLock { $0 } }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -217,7 +217,7 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {
-        stopped.store(true, ordering: .releasing)
+        stopped.withLock { $0 = true }
     }
 }
 
@@ -225,7 +225,7 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
 final class StubSource: DownloadSource {
     private let host: String
     private let tokens: [String]
-    private let count = Mutex(0)
+    private let count = OSAllocatedUnfairLock(initialState: 0)
 
     init(host: String, tokens: [String] = ["t1"]) {
         self.host = host
@@ -254,7 +254,7 @@ final class Fixture: Sendable {
     let server = StubServer()
     let source: StubSource
     let session = StubProtocol.makeSession()
-    private let sizes = Mutex<[String: Int]>([:])
+    private let sizes = OSAllocatedUnfairLock<[String: Int]>(initialState: [:])
 
     init(tokens: [String] = ["t1"]) {
         directory = FileManager.default.temporaryDirectory

@@ -1,5 +1,5 @@
 import Foundation
-import Synchronization
+import os
 import Testing
 @testable import DownloadKit
 
@@ -205,9 +205,9 @@ private let megabyte = 1 << 20
     @Test func failsAfterRetryLimitAndResumesFromCheckpoint() async throws {
         let fixture = Fixture()
         let data = fixture.addFile("a.bin", size: megabyte)
-        let failing = Atomic(true)
+        let failing = OSAllocatedUnfairLock(initialState: true)
         fixture.server.setFaultRule { request, _ in
-            guard failing.load(ordering: .relaxed), let first = request.range?.first else { return nil }
+            guard failing.withLock({ $0 }), let first = request.range?.first else { return nil }
             return first % Int64(256 * kilobyte) == 0
                 ? .disconnect(afterBytes: 100 * kilobyte)
                 : .status(500, body: #"{"error_code":2,"error_msg":"busy"}"#)
@@ -229,7 +229,7 @@ private let megabyte = 1 << 20
         #expect(saved.receivedBytes == snapshot.receivedBytes)
         #expect(saved.receivedBytes >= Int64(100 * kilobyte))
 
-        failing.store(false, ordering: .relaxed)
+        failing.withLock { $0 = false }
         fixture.server.clearLog()
         await engine.resume(id: "a.bin")
         _ = try await engine.waitForCompletion(of: "a.bin")
@@ -305,10 +305,10 @@ private let megabyte = 1 << 20
         let fixture = Fixture()
         let data = fixture.addFile("a.bin", size: 2 * megabyte)
         // 旧会话的请求停在 128 KB。新会话的请求先停在开头，取得换会话时保存的进度后再放行。
-        let released = Atomic(false)
+        let released = OSAllocatedUnfairLock(initialState: false)
         fixture.server.setStallRule { request in
             guard request.headers["X-Session"] == "new" else { return 128 * kilobyte }
-            return released.load(ordering: .relaxed) ? nil : 0
+            return released.withLock { $0 } ? nil : 0
         }
         let engine = fixture.makeEngine()
         let events = engine.events()
@@ -331,7 +331,7 @@ private let megabyte = 1 << 20
         #expect(await engine.snapshot(id: "a.bin")?.state == .running)
         let saved = try #require(try fixture.savedRecords().first)
         #expect(saved.receivedBytes == Int64(512 * kilobyte))
-        released.store(true, ordering: .relaxed)
+        released.withLock { $0 = true }
         let location = try await engine.waitForCompletion(of: "a.bin")
 
         #expect(fixture.contents("a.bin") == data)
@@ -702,7 +702,7 @@ private struct PlainError: Error {}
 /// 每次都抛出同一个错误的下载源。
 private final class ThrowingSource: DownloadSource {
     private let error: any Error & Sendable
-    private let count = Mutex(0)
+    private let count = OSAllocatedUnfairLock(initialState: 0)
 
     init(_ error: any Error & Sendable) {
         self.error = error
@@ -727,7 +727,7 @@ private final class GatedSource: DownloadSource {
 
     private let base: StubSource
     private let gated: Set<String>
-    private let state = Mutex(State())
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     init(_ base: StubSource, gating gated: Set<String>) {
         self.base = base

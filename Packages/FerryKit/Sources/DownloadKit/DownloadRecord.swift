@@ -1,6 +1,6 @@
 import CryptoKit
 import Foundation
-import Synchronization
+import os
 
 /// 文件中的一段字节范围 `[start, end)`。
 struct Segment: Codable, Sendable, Hashable {
@@ -61,11 +61,11 @@ extension DownloadRequest {
 /// 线程安全的 `DownloadRecord`。下载进行中时，传输任务每收到一块数据就更新它，引擎读取它报告进度。
 final class LiveRecord: Sendable {
     let request: DownloadRequest
-    private let storage: Mutex<DownloadRecord>
+    private let storage: OSAllocatedUnfairLock<DownloadRecord>
 
     init(_ record: DownloadRecord) {
         request = record.request
-        storage = Mutex(record)
+        storage = OSAllocatedUnfairLock(initialState: record)
     }
 
     var value: DownloadRecord { storage.withLock { $0 } }
@@ -76,7 +76,7 @@ final class LiveRecord: Sendable {
     }
 
     func update<T: Sendable>(_ body: (inout DownloadRecord) -> T) -> T {
-        storage.withLock { body(&$0) }
+        storage.withLockUnchecked { body(&$0) }
     }
 
     func segment(_ index: Int) -> Segment {
