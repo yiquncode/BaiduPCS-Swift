@@ -6,7 +6,7 @@ import WebKit
 
 /// 网页登录：显示百度的官方登录页，从网页的 Cookie 中取得凭据，再交给 `AppModel` 校验。
 struct WebLoginView: View {
-    /// 切换到粘贴 Cookie 登录。
+    /// 切换到粘贴 Cookie 登录。只在取不到网盘 STOKEN 时提供。
     let useCookieLogin: () -> Void
 
     @Environment(AppModel.self) private var model
@@ -51,8 +51,6 @@ struct WebLoginView: View {
 
             Divider()
             HStack {
-                Button("粘贴 Cookie 登录…", action: useCookieLogin)
-                    .disabled(loginTask != nil)
                 if loginTask != nil {
                     ProgressView().controlSize(.small)
                     Text("正在校验…").foregroundStyle(.secondary)
