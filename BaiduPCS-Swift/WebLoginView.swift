@@ -73,7 +73,7 @@ struct WebLoginView: View {
             self.session = session
             session.start()
         }
-        // 关闭 sheet 或切换到粘贴登录时停止网页并取消校验，取消后的登录不会生效。
+        // 关闭窗口或切换到粘贴登录时停止网页并取消校验，取消后的登录不会生效。
         .onDisappear {
             session?.stop()
             session = nil
@@ -144,7 +144,7 @@ final class WebLoginSession: NSObject {
     /// `proxyConfigurations` 为空时使用系统的代理设置。之后修改代理不影响这个网页。
     init(proxyConfigurations: [ProxyConfiguration]) {
         let configuration = WKWebViewConfiguration()
-        // 每次登录都是新的环境。关闭 sheet 后网页的 Cookie 全部丢弃，凭据只存在 Keychain 中。
+        // 每次登录都是新的环境。关闭窗口后网页的 Cookie 全部丢弃，凭据只存在 Keychain 中。
         let dataStore = WKWebsiteDataStore.nonPersistent()
         dataStore.proxyConfigurations = proxyConfigurations
         configuration.websiteDataStore = dataStore
@@ -205,7 +205,7 @@ final class WebLoginSession: NSObject {
             defer { isChecking = false }
             let started = ContinuousClock.now
             let cookies = await cookieStore.allCookies()
-            // 等待期间可能已经交出凭据，或 sheet 已经关闭。
+            // 等待期间可能已经交出凭据，或窗口已经关闭。
             guard isActive, !hasDeliveredCredential else { return }
             Self.logCheck(cookies, page: webView.url, trigger: trigger, duration: .now - started)
             do {

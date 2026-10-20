@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// 登录 sheet。先显示 `AppModel.loginMethod` 指定的方式，可以在网页登录和粘贴 Cookie 登录之间切换。
+/// 登录窗口。先显示 `AppModel.loginMethod` 指定的方式，可以在网页登录和粘贴 Cookie 登录之间切换。
 struct LoginView: View {
+    static let windowID = "login"
+
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -66,7 +68,7 @@ private struct CookieLoginView: View {
             .padding()
         }
         .frame(width: 500)
-        // 关闭 sheet 时取消进行中的校验，取消后的登录不会生效。
+        // 关闭窗口时取消进行中的校验，取消后的登录不会生效。
         .onDisappear { loginTask?.cancel() }
     }
 

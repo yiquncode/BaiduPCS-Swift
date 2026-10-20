@@ -27,7 +27,6 @@ final class AppModel {
 
     /// 主窗口的 sheet。同一时间只显示一个。
     enum Sheet: String, Identifiable {
-        case login
         case addLink
 
         var id: String { rawValue }
@@ -38,16 +37,17 @@ final class AppModel {
     /// 移除任务时没能移到废纸篓的文件或目录。界面提示后清空。
     var untrashedItems: [URL] = []
 
-    /// 登录 sheet 显示的登录方式。
+    /// 登录窗口显示的登录方式。
     enum LoginMethod {
         case web
         case cookie
     }
 
-    /// 打开登录 sheet 时设定，用户在 sheet 中可以切换。
+    /// 打开登录窗口时设定，用户在窗口中可以切换。
     var loginMethod = LoginMethod.web
     /// 主窗口关闭后，用它重新打开（例如点击 Dock 图标）。
     @ObservationIgnored var openMainWindow: (() -> Void)?
+    @ObservationIgnored var openLoginWindow: (() -> Void)?
 
     @ObservationIgnored private let source: BaiduDownloadSource
     @ObservationIgnored private let engine: DownloadEngine
@@ -368,7 +368,7 @@ final class AppModel {
     /// 先显示网页登录。
     func presentLogin() {
         loginMethod = .web
-        sheet = .login
+        openLoginWindow?()
     }
 
     /// 百度明确返回登录失效时，显示失效横幅。其他错误不影响登录状态。

@@ -10,11 +10,23 @@ struct FerryApp: App {
             ContentView()
                 .environment(appDelegate.model)
         }
+        // 窗口尺寸跟随内容：欢迎页固定尺寸，任务列表可以缩放。
+        .windowResizability(.contentSize)
+        .defaultSize(ContentView.mainSize)
         .commands {
             SidebarCommands()
             InspectorCommands()
             FerryCommands(model: appDelegate.model)
         }
+
+        // 百度的登录页比欢迎页大，所以登录用单独的窗口，不用 sheet。
+        Window("登录百度网盘", id: LoginView.windowID) {
+            LoginView()
+                .environment(appDelegate.model)
+        }
+        .windowResizability(.contentSize)
+        .restorationBehavior(.disabled)
+        .commandsRemoved()
 
         Settings {
             SettingsView()
