@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		18F1CB333086E8A000A59465 /* BaiduKit in Frameworks */ = {isa = PBXBuildFile; productRef = 18F1CB313086E8A000A59465 /* BaiduKit */; };
 		18F1CB343086E8A000A59465 /* DownloadKit in Frameworks */ = {isa = PBXBuildFile; productRef = 18F1CB323086E8A000A59465 /* DownloadKit */; };
+		18F1CB363086E8A000A59465 /* FerryCore in Frameworks */ = {isa = PBXBuildFile; productRef = 18F1CB353086E8A000A59465 /* FerryCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +31,7 @@
 			files = (
 				18F1CB333086E8A000A59465 /* BaiduKit in Frameworks */,
 				18F1CB343086E8A000A59465 /* DownloadKit in Frameworks */,
+				18F1CB363086E8A000A59465 /* FerryCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -74,6 +76,7 @@
 			packageProductDependencies = (
 				18F1CB313086E8A000A59465 /* BaiduKit */,
 				18F1CB323086E8A000A59465 /* DownloadKit */,
+				18F1CB353086E8A000A59465 /* FerryCore */,
 			);
 			productName = "BaiduPCS-Swift";
 			productReference = 18F1CB143086E87B00A59465 /* BaiduPCS-Swift.app */;
@@ -95,11 +98,11 @@
 				};
 			};
 			buildConfigurationList = 18F1CB0F3086E87B00A59465 /* Build configuration list for PBXProject "BaiduPCS-Swift" */;
-			developmentRegion = en;
+			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
 				Base,
+				"zh-Hans",
 			);
 			mainGroup = 18F1CB0B3086E87B00A59465;
 			minimizedProjectReferenceProxies = 1;
@@ -286,7 +289,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
@@ -321,7 +324,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
@@ -363,6 +366,10 @@
 		18F1CB323086E8A000A59465 /* DownloadKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DownloadKit;
+		};
+		18F1CB353086E8A000A59465 /* FerryCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = FerryCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
