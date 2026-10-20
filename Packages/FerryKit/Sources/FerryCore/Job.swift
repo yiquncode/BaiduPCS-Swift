@@ -37,6 +37,8 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
     public var createdAt: Date
     /// 网盘中的任务子目录已删除。
     public var isCleanedUp: Bool
+    /// 创建任务时的下载目录。之后修改设置中的下载目录不影响这个任务。旧版本创建的任务为 nil。
+    public var downloadFolder: DownloadFolder?
 
     public init(link: ShareLink, password: String?, entries: [ShareEntry], transferFolder: String,
                 id: UUID = UUID(), createdAt: Date = .now) {
@@ -70,6 +72,7 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
         warning = try container.decodeIfPresent(String.self, forKey: .warning)
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .distantPast
         isCleanedUp = try container.decodeIfPresent(Bool.self, forKey: .isCleanedUp) ?? false
+        downloadFolder = try container.decodeIfPresent(DownloadFolder.self, forKey: .downloadFolder)
     }
 
     public static func shortID(_ id: UUID) -> String {

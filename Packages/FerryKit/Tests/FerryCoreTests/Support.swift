@@ -251,6 +251,7 @@ final class Fixture {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("FerryCoreTests-\(UUID().uuidString)")
         netdisk = FakeNetdisk(share: share, emptyDirectories: emptyDirectories)
         server = FileServer(netdisk: netdisk)
+        try? FileManager.default.createDirectory(at: directory.appendingPathComponent("downloads"), withIntermediateDirectories: true)
     }
 
     deinit {
@@ -286,10 +287,11 @@ final class Fixture {
                        configuration: Self.configuration, session: session)
     }
 
-    func makeCoordinator(settings: FerrySettings = FerrySettings(maxConcurrentFiles: 4)) -> JobCoordinator {
-        let engine = makeEngine()
-        let coordinator = JobCoordinator(engine: engine, store: store, settings: settings, downloadDirectory: downloads,
-                                         baseConfiguration: Self.configuration)
+    func makeCoordinator(settings: FerrySettings = FerrySettings(maxConcurrentFiles: 4), downloadFolder: URL? = nil,
+                         folderAccess: any DownloadFolderAccess = SecurityScopedFolderAccess()) -> JobCoordinator {
+        let coordinator = JobCoordinator(engine: makeEngine(), store: store, settings: settings,
+                                         downloadFolder: DownloadFolder(url: downloadFolder ?? downloads),
+                                         folderAccess: folderAccess, baseConfiguration: Self.configuration)
         coordinator.netdisk = netdisk
         return coordinator
     }
@@ -311,6 +313,27 @@ func randomData(_ count: Int) -> Data {
     var data = Data(count: count)
     data.withUnsafeMutableBytes { arc4random_buf($0.baseAddress, count) }
     return data
+}
+
+/// 记录打开和关闭的下载目录。`failing` 中的路径无法打开。
+final class FakeFolderAccess: DownloadFolderAccess {
+    private let state = Mutex<(opened: [String], closed: [String], failing: Set<String>)>(([], [], []))
+
+    var opened: [String] { state.withLock { $0.opened } }
+    var closed: [String] { state.withLock { $0.closed } }
+    func setFailing(_ paths: Set<String>) { state.withLock { $0.failing = paths } }
+
+    func open(_ folder: DownloadFolder) throws -> OpenedFolder {
+        try state.withLock { state in
+            guard !state.failing.contains(folder.url.path) else { throw DownloadFolderError.inaccessible(folder.url) }
+            state.opened.append(folder.url.path)
+            return OpenedFolder(url: folder.url, isSecurityScoped: true)
+        }
+    }
+
+    func close(_ folder: OpenedFolder) {
+        state.withLock { $0.closed.append(folder.url.path) }
+    }
 }
 
 struct TimeoutError: Error {}

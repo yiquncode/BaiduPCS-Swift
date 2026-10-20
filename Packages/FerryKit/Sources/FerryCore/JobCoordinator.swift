@@ -31,8 +31,8 @@ public final class JobCoordinator {
     /// 引擎中文件下载的最新状态，键是文件下载 id。
     public private(set) var downloads: [String: DownloadSnapshot] = [:]
     public private(set) var settings: FerrySettings
-    /// 新的文件下载保存到这里。已加入引擎的文件下载不受影响。
-    public var downloadDirectory: URL
+    /// 新任务的下载目录。已有任务使用创建时记录的目录。
+    public var downloadFolder: DownloadFolder
     /// 未登录时为 nil。
     public var netdisk: (any Netdisk)?
     /// 启动时任务列表无法读取的说明。界面显示它，用户关闭后清空。
@@ -48,6 +48,9 @@ public final class JobCoordinator {
     @ObservationIgnored private let engine: DownloadEngine
     @ObservationIgnored private let store: JobStore
     @ObservationIgnored private let baseConfiguration: DownloadConfiguration
+    @ObservationIgnored private let folderAccess: any DownloadFolderAccess
+    /// 已取得访问权限的任务下载目录。任务完成或移除后交回。
+    @ObservationIgnored private var openedFolders: [UUID: OpenedFolder] = [:]
     /// 每个任务的转存或收尾任务。
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
     /// 每个任务最后一个引擎操作。新的操作等它结束后再执行。
@@ -62,12 +65,14 @@ public final class JobCoordinator {
     @ObservationIgnored private var canSave = true
 
     /// - Parameter baseConfiguration: 设置不覆盖的下载参数（分片大小、重试等）。
-    public init(engine: DownloadEngine, store: JobStore, settings: FerrySettings, downloadDirectory: URL,
+    public init(engine: DownloadEngine, store: JobStore, settings: FerrySettings, downloadFolder: DownloadFolder,
+                folderAccess: any DownloadFolderAccess = SecurityScopedFolderAccess(),
                 baseConfiguration: DownloadConfiguration = DownloadConfiguration()) {
         self.engine = engine
         self.store = store
         self.settings = settings
-        self.downloadDirectory = downloadDirectory
+        self.downloadFolder = downloadFolder
+        self.folderAccess = folderAccess
         self.baseConfiguration = baseConfiguration
         let events = engine.events()
         Task { [weak self] in
@@ -80,7 +85,7 @@ public final class JobCoordinator {
 
     // MARK: - 启动与退出
 
-    /// 读取任务列表，恢复引擎中的文件下载。调用前要取得下载目录的访问权限。
+    /// 读取任务列表，取得未完成任务的下载目录的访问权限，然后恢复引擎中的文件下载。
     public func start() async {
         guard !hasLoaded else { return }
         defer {
@@ -117,6 +122,18 @@ public final class JobCoordinator {
         guard isLoaded else {
             save()
             return
+        }
+        // 引擎恢复的文件下载要写入这些目录，所以先取得访问权限。
+        for job in jobs where job.phase != .completed {
+            do {
+                _ = try folderURL(for: job.id)
+            } catch {
+                if job.phase == .downloading {
+                    fail(job.id, step: .download, error)
+                } else {
+                    update(job.id) { $0.error = Self.message(for: error) }
+                }
+            }
         }
         let restored: [DownloadSnapshot]
         do {
@@ -180,7 +197,8 @@ public final class JobCoordinator {
     /// 创建任务并开始转存。`session` 是添加链接时打开的分享会话。
     @discardableResult
     public func addJob(session: ShareSession, entries: [ShareEntry]) -> Job {
-        let job = Job(link: session.link, password: session.password, entries: entries, transferFolder: settings.transferFolder)
+        var job = Job(link: session.link, password: session.password, entries: entries, transferFolder: settings.transferFolder)
+        job.downloadFolder = downloadFolder
         jobs.insert(job, at: 0)
         save()
         startTransfer(job.id, session: session, removingExisting: false)
@@ -249,6 +267,7 @@ public final class JobCoordinator {
         }
         jobs.removeAll { $0.id == id }
         save()
+        closeFolder(of: id)
         if settings.cleanupAfterDownload, !job.isCleanedUp, let netdisk {
             do {
                 try await netdisk.delete(paths: [job.remoteDirectory])
@@ -284,6 +303,8 @@ public final class JobCoordinator {
     private func transfer(_ id: Job.ID, session: ShareSession?, removingExisting: Bool) async {
         guard let job = activeJob(id) else { return }
         do {
+            // 先确认下载目录可以写入，再在网盘中转存。
+            _ = try folderURL(for: id)
             guard let netdisk else { throw CoordinatorError.notLoggedIn }
             if removingExisting {
                 try await netdisk.delete(paths: [job.remoteDirectory])
@@ -370,7 +391,16 @@ public final class JobCoordinator {
     /// 让引擎中的文件下载和任务一致：不在引擎中的加入引擎；任务没暂停时，暂停的继续。
     /// `resumingFailed` 为 true 时失败的也继续（重试）。每处理一个文件都重新读取任务，任务暂停、移除或失败时停止。
     private func continueDownloads(_ id: Job.ID, resumingFailed: Bool) async {
-        guard let files = activeJob(id)?.files else { return }
+        guard let job = activeJob(id), job.phase == .downloading else { return }
+        let files = job.files
+        if files.contains(where: { !$0.isCompleted }) {
+            do {
+                _ = try folderURL(for: id)
+            } catch {
+                fail(id, step: .download, error)
+                return
+            }
+        }
         for file in files where !file.isCompleted {
             guard !Task.isCancelled, let job = activeJob(id), job.phase == .downloading else { return }
             let state = await engine.snapshot(id: file.id)?.state
@@ -414,7 +444,7 @@ public final class JobCoordinator {
     private func enqueue(_ file: JobFile, of id: Job.ID) async throws {
         await willEnqueue?(file)
         guard activeJob(id) != nil else { return }
-        guard let destination = LocalPath.destination(for: file.relativePath, in: downloadDirectory) else {
+        guard let destination = LocalPath.destination(for: file.relativePath, in: try folderURL(for: id)) else {
             throw TransferCheckError.unsafePath(file.relativePath)
         }
         try await engine.enqueue(DownloadRequest(
@@ -507,9 +537,45 @@ public final class JobCoordinator {
                 $0.isPaused = false
             }
             save()
+            closeFolder(of: id)
             if let job = job(id) {
                 onJobCompleted?(job)
             }
+        }
+    }
+
+    // MARK: - 下载目录
+
+    /// 任务下载目录的当前位置。第一次调用时取得访问权限，直到任务完成或移除。
+    /// 记录的 bookmark 不可用、但设置中的下载目录是同一位置时，改用设置中的 bookmark（用户重新选择了这个目录）。
+    private func folderURL(for id: Job.ID) throws -> URL {
+        if let opened = openedFolders[id] { return opened.url }
+        guard let job = job(id) else { throw CancellationError() }
+        let recorded = job.downloadFolder ?? downloadFolder
+        var folder = recorded
+        let opened: OpenedFolder
+        do {
+            opened = try folderAccess.open(recorded)
+        } catch {
+            guard recorded != downloadFolder, recorded.isSameLocation(as: downloadFolder),
+                  let reopened = try? folderAccess.open(downloadFolder) else { throw error }
+            folder = downloadFolder
+            opened = reopened
+        }
+        if let renewed = opened.renewedBookmark {
+            folder.bookmark = renewed
+        }
+        if folder != job.downloadFolder {
+            update(id) { $0.downloadFolder = folder }
+            save()
+        }
+        openedFolders[id] = opened
+        return opened.url
+    }
+
+    private func closeFolder(of id: Job.ID) {
+        if let opened = openedFolders.removeValue(forKey: id) {
+            folderAccess.close(opened)
         }
     }
 

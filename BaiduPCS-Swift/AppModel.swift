@@ -26,6 +26,8 @@ final class AppModel {
     @ObservationIgnored private let source: BaiduDownloadSource
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored private var hasRequestedNotifications = false
+    /// 设置中的下载目录。应用在选择期间一直持有它的访问权限；任务另外持有各自目录的访问权限。
+    @ObservationIgnored private var accessedDirectory: URL?
 
     private static let settingsKey = "settings"
 
@@ -42,7 +44,7 @@ final class AppModel {
         self.source = source
         downloadDirectory = Self.defaultDownloadDirectory
         coordinator = JobCoordinator(engine: engine, store: JobStore(fileURL: FerryDirectories.jobsFile),
-                                     settings: settings, downloadDirectory: Self.defaultDownloadDirectory)
+                                     settings: settings, downloadFolder: DownloadFolder(url: Self.defaultDownloadDirectory))
         coordinator.onJobCompleted = { [weak self] job in self?.notifyCompletion(of: job) }
         resolveDownloadDirectory()
         if let login = CredentialStore.load() {
@@ -115,9 +117,13 @@ final class AppModel {
         Task { await coordinator.updateSettings(settings) }
     }
 
-    /// 访问权限在应用运行期间一直保持：已加入队列的文件下载可能还要写入这个目录。
+    /// 新任务的下载目录。任务记录它，以后每次启动用 bookmark 重新取得访问权限。
+    private var currentFolder: DownloadFolder {
+        DownloadFolder(url: downloadDirectory, bookmark: accessedDirectory == nil ? nil : settings.downloadDirectoryBookmark)
+    }
+
     private func resolveDownloadDirectory() {
-        defer { coordinator.downloadDirectory = downloadDirectory }
+        defer { coordinator.downloadFolder = currentFolder }
         guard let bookmark = settings.downloadDirectoryBookmark else {
             downloadDirectory = Self.defaultDownloadDirectory
             return
@@ -129,6 +135,7 @@ final class AppModel {
             if isStale, let renewed = try? url.bookmarkData(options: .withSecurityScope) {
                 settings.downloadDirectoryBookmark = renewed
             }
+            accessedDirectory = url
             downloadDirectory = url
             downloadDirectoryProblem = nil
         } catch {
@@ -142,9 +149,11 @@ final class AppModel {
         let isAccessing = url.startAccessingSecurityScopedResource()
         do {
             settings.downloadDirectoryBookmark = try url.bookmarkData(options: .withSecurityScope)
+            releaseAccessedDirectory()
+            if isAccessing { accessedDirectory = url }
             downloadDirectory = url
             downloadDirectoryProblem = nil
-            coordinator.downloadDirectory = url
+            coordinator.downloadFolder = DownloadFolder(url: url, bookmark: settings.downloadDirectoryBookmark)
         } catch {
             if isAccessing { url.stopAccessingSecurityScopedResource() }
             downloadDirectoryProblem = "无法保存下载目录的访问权限：\(error.localizedDescription)"
@@ -153,9 +162,16 @@ final class AppModel {
 
     func useDefaultDownloadDirectory() {
         settings.downloadDirectoryBookmark = nil
+        releaseAccessedDirectory()
         downloadDirectory = Self.defaultDownloadDirectory
         downloadDirectoryProblem = nil
-        coordinator.downloadDirectory = downloadDirectory
+        coordinator.downloadFolder = currentFolder
+    }
+
+    /// 之前选择的目录中未完成的任务持有自己的访问权限，所以这里可以交回。
+    private func releaseAccessedDirectory() {
+        accessedDirectory?.stopAccessingSecurityScopedResource()
+        accessedDirectory = nil
     }
 
     // MARK: - 任务
