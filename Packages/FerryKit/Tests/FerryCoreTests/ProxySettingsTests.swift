@@ -10,13 +10,13 @@ import Testing
         let bookmark = Data([1, 2, 3])
         let json = """
         {"downloadDirectoryBookmark": "\(bookmark.base64EncodedString())", "transferFolder": "/Downloads",
-         "cleanupAfterDownload": true, "maxConcurrentFiles": 3, "connectionsPerFile": 8}
+         "cleanupAfterDownload": true, "maxConcurrentFiles": 2, "connectionsPerFile": 8}
         """
         let settings = try JSONDecoder().decode(FerrySettings.self, from: Data(json.utf8))
         #expect(settings.proxy == ProxySettings())
         #expect(settings.proxy.mode == .system)
         #expect(settings == FerrySettings(downloadDirectoryBookmark: bookmark, transferFolder: "/Downloads", cleanupAfterDownload: true,
-                                          maxConcurrentFiles: 3, connectionsPerFile: 8))
+                                          maxConcurrentFiles: 2, connectionsPerFile: 8))
     }
 
     @Test func invalidProxyKeepsOtherSettings() throws {

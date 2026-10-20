@@ -53,9 +53,28 @@ private struct DownloadSettingsView: View {
         }
     }
 
-    /// 两项中有一项大于 1 时，非会员账号会被限速。
-    private var usesMultipleConnections: Bool {
-        model.settings.maxConcurrentFiles > 1 || model.settings.connectionsPerFile > 1
+    /// 选择预设时填入它的两项。两项不等于任何预设时显示“自定义”。
+    private var concurrencyPreset: Binding<ConcurrencyPreset?> {
+        Binding {
+            model.settings.concurrencyPreset
+        } set: { preset in
+            if let preset { model.settings.apply(preset) }
+        }
+    }
+
+    @ViewBuilder private var concurrencyFooter: some View {
+        switch model.settings.concurrencyPreset {
+        case .regular:
+            Text("非超级会员（包括普通会员）同时使用多个连接会被百度限速，所以两项都是 1。")
+                .foregroundStyle(.secondary)
+        case .svip:
+            Text("超级会员下载不限速。两项相乘最多为 \(FerrySettings.totalConnectionsLimit)，建议不超过 12。")
+                .foregroundStyle(.secondary)
+        case nil:
+            Label("只有超级会员可以同时使用多个连接。其他账号会被百度限速，限速可能持续数小时到数天，并影响这个账号的所有客户端。",
+                  systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        }
     }
 
     var body: some View {
@@ -79,24 +98,22 @@ private struct DownloadSettingsView: View {
             }
 
             Section {
-                Stepper(value: $model.settings.maxConcurrentFiles, in: FerrySettings.concurrentFilesRange) {
+                Picker("网盘会员", selection: concurrencyPreset) {
+                    Text("非超级会员").tag(ConcurrencyPreset?.some(.regular))
+                    Text("超级会员").tag(ConcurrencyPreset?.some(.svip))
+                    if model.settings.concurrencyPreset == nil {
+                        Text("自定义").tag(ConcurrencyPreset?.none)
+                    }
+                }
+                Stepper(value: $model.settings.maxConcurrentFiles, in: model.settings.allowedConcurrentFiles) {
                     LabeledContent("同时下载文件数", value: "\(model.settings.maxConcurrentFiles)")
                 }
-                Stepper(value: $model.settings.connectionsPerFile, in: FerrySettings.connectionsRange) {
+                Stepper(value: $model.settings.connectionsPerFile, in: model.settings.allowedConnections) {
                     LabeledContent("每个文件的连接数", value: "\(model.settings.connectionsPerFile)")
                 }
             } footer: {
-                Group {
-                    if usesMultipleConnections {
-                        Label("非会员账号同时使用多个连接（同时下载多个文件或每个文件使用多个连接）会被百度限速，限速可能持续数小时到数天，并影响这个账号的所有客户端。建议两项都设为 1。",
-                              systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                    } else {
-                        Text("非会员账号建议两项都设为 1。会员账号可以调高。")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
+                concurrencyFooter
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {

@@ -147,6 +147,33 @@ import Testing
         #expect(!FerrySettings().cleanupAfterDownload)
     }
 
+    @Test func settingsLimitTotalConnections() throws {
+        var settings = FerrySettings(maxConcurrentFiles: 3, connectionsPerFile: 8)
+        #expect(settings.allowedConcurrentFiles == 1...2)
+        #expect(settings.allowedConnections == 1...6)
+        let configuration = settings.downloadConfiguration()
+        #expect(configuration.maxConcurrentFiles == 3)
+        #expect(configuration.segmentsPerFile == 6)
+
+        settings.limitConcurrency()
+        #expect(settings == FerrySettings(maxConcurrentFiles: 3, connectionsPerFile: 6))
+
+        let json = #"{"maxConcurrentFiles": 10, "connectionsPerFile": 16}"#
+        let decoded = try JSONDecoder().decode(FerrySettings.self, from: Data(json.utf8))
+        #expect(decoded.maxConcurrentFiles == 10)
+        #expect(decoded.connectionsPerFile == 2)
+    }
+
+    @Test func settingsMatchConcurrencyPresets() {
+        var settings = FerrySettings()
+        #expect(settings.concurrencyPreset == .regular)
+        settings.apply(.svip)
+        #expect(settings.concurrencyPreset == .svip)
+        #expect(settings.downloadConfiguration().segmentsPerFile == ConcurrencyPreset.svip.connectionsPerFile)
+        settings.connectionsPerFile += 1
+        #expect(settings.concurrencyPreset == nil)
+    }
+
     @Test func downloadContextCarriesRemotePath() {
         let path = "/Ferry/ABCD/目录/a b.zip"
         #expect(BaiduDownloadSource.remotePath(from: BaiduDownloadSource.context(forRemotePath: path)) == path)
