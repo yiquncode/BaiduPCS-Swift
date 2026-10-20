@@ -1,4 +1,5 @@
 import BaiduKit
+import OSLog
 import SwiftUI
 import WebKit
 
@@ -121,6 +122,8 @@ final class WebLoginSession: NSObject {
     @ObservationIgnored private var failedURL: URL?
     @ObservationIgnored private var loadingObservation: NSKeyValueObservation?
 
+    /// 只记录 Cookie 的名字、域名和属性，不记录值。用 `log show --info --predicate 'category == "WebLogin"'` 查看。
+    private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Ferry", category: "WebLogin")
     private static let startURL = URL(string: "https://pan.baidu.com/")!
     /// 只有 BDUSS 时加载它。网盘的 STOKEN 在这一步写入。
     private static let diskMainURL = URL(string: "https://pan.baidu.com/disk/main")!
@@ -182,12 +185,15 @@ final class WebLoginSession: NSObject {
             let cookies = await cookieStore.allCookies()
             // 等待期间可能已经交出凭据，或 sheet 已经关闭。
             guard isActive, !hasDeliveredCredential else { return }
+            Self.logCheck(cookies, page: webView.url, pageFinished: pageFinished)
             do {
                 let credential = try Credential.parse(cookies)
+                Self.log.info("credential found")
                 hasDeliveredCredential = true
                 isMissingNetdiskSTOKEN = false
                 onCredential?(credential)
             } catch BaiduError.missingSTOKEN {
+                Self.log.info("missing STOKEN, diskMainLoaded=\(self.hasLoadedDiskMain, privacy: .public) diskMainFinished=\(self.hasFinishedDiskMain, privacy: .public)")
                 if !hasLoadedDiskMain {
                     guard pageFinished, webView.url?.host() == Self.diskMainURL.host() else { return }
                     hasLoadedDiskMain = true
@@ -197,8 +203,17 @@ final class WebLoginSession: NSObject {
                 }
             } catch {
                 // 还没有登录。
+                Self.log.info("no credential: \(String(describing: error), privacy: .public)")
             }
         }
+    }
+
+    private static func logCheck(_ cookies: [HTTPCookie], page: URL?, pageFinished: Bool) {
+        let summary = cookies
+            .map { "\($0.name) domain=\($0.domain) path=\($0.path) secure=\($0.isSecure) expires=\($0.expiresDate.map { "\($0)" } ?? "session")" }
+            .sorted()
+            .joined(separator: "; ")
+        log.info("check page=\(page?.host() ?? "-", privacy: .public)\(page?.path() ?? "", privacy: .public) finished=\(pageFinished, privacy: .public) cookies=[\(summary, privacy: .public)]")
     }
 }
 
