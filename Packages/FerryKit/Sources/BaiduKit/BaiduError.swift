@@ -15,6 +15,8 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
     case wrongPassword
     case shareNotFound
     case shareExpired
+    /// 分享页报告分享不可用，但无法区分不存在还是已失效。
+    case shareUnavailable
     case shareBanned
     case captchaRequired
     case verificationTriggered
@@ -65,6 +67,8 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
             "分享页面不存在，请检查链接是否完整。"
         case .shareExpired:
             "分享已失效，可能已被取消、删除或过期。"
+        case .shareUnavailable:
+            "分享不存在或已失效。"
         case .shareBanned:
             "这个分享因违规被禁用。"
         case .captchaRequired:

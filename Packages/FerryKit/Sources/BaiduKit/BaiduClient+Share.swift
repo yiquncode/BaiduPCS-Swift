@@ -64,7 +64,7 @@ extension BaiduClient {
         let (data, response) = try await send(request)
         if response.statusCode == 404 { throw BaiduError.shareNotFound }
         let html = String(decoding: data, as: UTF8.self)
-        let page = try SharePage.parse(html: html)
+        let page = try SharePage.parse(html: html, url: response.url)
         let redirected = response.url?.path.hasSuffix("/share/init") ?? false
         return (page, .from(response: response), redirected)
     }

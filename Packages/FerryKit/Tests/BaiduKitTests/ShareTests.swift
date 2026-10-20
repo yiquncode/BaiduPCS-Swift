@@ -103,6 +103,13 @@ extension StubbedNetworkTests {
             }
         }
 
+        @Test func missingShareRedirectsToWapError() async {
+            let client = Fixture.client { _ in .html(ProbePage.wapError(loggedIn: true), url: ProbePage.wapErrorURL) }
+            await #expect(throws: BaiduError.shareNotFound) {
+                try await client.openShare(Fixture.link, password: nil)
+            }
+        }
+
         @Test func missingLoginState() async {
             let client = Fixture.client { _ in .html("<html>请登录</html>") }
             await #expect(throws: BaiduError.loginStateMissing) {
