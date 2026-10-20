@@ -174,7 +174,9 @@ final class WebLoginSession: NSObject {
     }
 
     /// 有 BDUSS 和网盘的 STOKEN 时交出凭据；只有 BDUSS 时加载一次网盘主页。
-    private func checkCookies() {
+    /// - Parameter pageFinished: 网盘的页面刚加载完成。只在这时加载网盘主页：BDUSS 可能在
+    ///   passport 的安全验证或绑定手机等步骤之前就已写入，这时跳转会打断登录。
+    private func checkCookies(pageFinished: Bool = false) {
         Task {
             guard isActive, !hasDeliveredCredential else { return }
             let cookies = await cookieStore.allCookies()
@@ -187,6 +189,7 @@ final class WebLoginSession: NSObject {
                 onCredential?(credential)
             } catch BaiduError.missingSTOKEN {
                 if !hasLoadedDiskMain {
+                    guard pageFinished, webView.url?.host() == Self.diskMainURL.host() else { return }
                     hasLoadedDiskMain = true
                     diskMainNavigation = webView.load(URLRequest(url: Self.diskMainURL))
                 } else if hasFinishedDiskMain {
@@ -213,7 +216,7 @@ extension WebLoginSession: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if navigation === diskMainNavigation { hasFinishedDiskMain = true }
-        checkCookies()
+        checkCookies(pageFinished: true)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
