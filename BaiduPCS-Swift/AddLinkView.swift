@@ -66,13 +66,13 @@ struct AddLinkView: View {
                 }
                 .labelStyle(.iconOnly)
                 .help("粘贴分享链接")
-                Text("提取码")
-                    .accessibilityHidden(true)
-                TextField("提取码", text: $password, prompt: Text("4 位"))
-                    .labelsHidden()
-                    .autocorrectionDisabled()
-                    .frame(width: 64)
-                    .onChange(of: password) { closeShare() }
+                LabeledContent("提取码") {
+                    TextField("提取码", text: $password, prompt: Text("4 位"))
+                        .labelsHidden()
+                        .autocorrectionDisabled()
+                        .frame(width: 64)
+                        .onChange(of: password) { closeShare() }
+                }
                 Button("打开", action: openShare)
                     .keyboardShortcut(tree == nil ? .defaultAction : nil)
                     .disabled(!canOpen)

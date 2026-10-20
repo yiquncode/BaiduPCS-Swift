@@ -104,7 +104,8 @@ private struct AccountView: View {
                 .contentShape(.rect)
             }
             .menuStyle(.button)
-            .buttonStyle(.plain)
+            // 悬停和按下时有高亮，看得出可以点击。
+            .buttonStyle(.accessoryBar)
             .menuIndicator(.hidden)
             .help("账号")
             .logOutConfirmation(isPresented: $isConfirmingLogOut)

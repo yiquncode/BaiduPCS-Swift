@@ -24,7 +24,7 @@ struct JobInspector: View {
     }
 }
 
-/// 选中多个任务：数量和对这些任务的操作。
+/// 选中多个任务：数量和对这些任务的操作。和单个任务的详情一样，只列出可用的操作。
 private struct MultipleSelection: View {
     let jobs: [Job]
     let onRemove: () -> Void
@@ -35,14 +35,22 @@ private struct MultipleSelection: View {
             Label("已选择 \(jobs.count) 个任务", systemImage: "square.stack")
         } actions: {
             VStack {
-                Button("全部暂停") { model.pauseAll(jobs) }
-                    .disabled(model.pausableJobs(in: jobs).isEmpty)
-                Button("全部继续") { model.resumeAll(jobs) }
-                    .disabled(model.resumableJobs(in: jobs).isEmpty)
-                Button("移除…", role: .destructive, action: onRemove)
-                    .disabled(!jobs.contains { model.canOperate(on: $0) })
+                ForEach(JobAction.allCases, id: \.self) { action in
+                    let targets = model.jobs(in: jobs, allowing: action)
+                    if !targets.isEmpty {
+                        Button {
+                            model.perform(action, on: targets)
+                        } label: {
+                            Text(action.title).frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                Button(role: .destructive, action: onRemove) {
+                    Text("移除…").frame(maxWidth: .infinity)
+                }
+                .disabled(!jobs.contains { model.canOperate(on: $0) })
             }
-            .frame(maxWidth: 160)
+            .frame(maxWidth: 180)
             .buttonStyle(.bordered)
             .controlSize(.large)
         }

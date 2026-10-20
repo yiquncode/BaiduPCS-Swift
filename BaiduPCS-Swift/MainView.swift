@@ -39,7 +39,7 @@ struct MainView: View {
                         } label: {
                             Label("添加链接", systemImage: "plus")
                         }
-                        .help("添加分享链接（⌘N）")
+                        .help("添加分享链接")
                     }
                     ToolbarItem(placement: .primaryAction) {
                         PauseResumeAllButton()
