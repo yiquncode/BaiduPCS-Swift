@@ -1,17 +1,20 @@
 import FerryCore
 import SwiftUI
 
-/// 已登录或有任务时的主窗口：侧边栏（任务分类和账号）和任务列表。
+/// 已登录或有任务时的主窗口：侧边栏（任务分类和账号）、任务列表和详情栏。
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @State private var category: JobCategory? = .all
     @State private var selection: Set<Job.ID> = []
+    @SceneStorage("isInspectorPresented") private var isInspectorPresented = true
     /// 等待确认移除的任务。
     @State private var pendingRemoval: [Job] = []
 
     var body: some View {
         let current = category ?? .all
         let jobs = model.coordinator.jobs.filter(current.contains)
+        // 只算当前列表中的任务。切换分类后，看不到的任务不再算作选中。
+        let selectedJobs = jobs.filter { selection.contains($0.id) }
         NavigationSplitView {
             SidebarView(selection: $category)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
@@ -21,6 +24,10 @@ struct MainView: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) { StatusBar() }
                 .navigationTitle(current.title)
                 .navigationSubtitle("\(jobs.count) 个任务")
+                .inspector(isPresented: $isInspectorPresented) {
+                    JobInspector(jobs: selectedJobs, onRemove: requestRemoval)
+                        .inspectorColumnWidth(min: 260, ideal: 320, max: 480)
+                }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
@@ -29,6 +36,14 @@ struct MainView: View {
                             Label("添加链接", systemImage: "plus")
                         }
                         .help("添加分享链接（⌘N）")
+                    }
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            isInspectorPresented.toggle()
+                        } label: {
+                            Label(isInspectorPresented ? "隐藏详情" : "显示详情", systemImage: "sidebar.trailing")
+                        }
+                        .help(isInspectorPresented ? "隐藏详情" : "显示详情")
                     }
                 }
         }

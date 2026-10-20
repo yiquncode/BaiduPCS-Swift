@@ -241,6 +241,24 @@ final class AppModel {
         Task { await coordinator.resume(job.id) }
     }
 
+    /// 其中下载中且未暂停、可以暂停的任务。
+    func pausableJobs(in jobs: [Job]) -> [Job] {
+        jobs.filter { $0.phase == .downloading && !$0.isPaused && canOperate(on: $0) }
+    }
+
+    /// 其中已暂停、可以继续的任务。
+    func resumableJobs(in jobs: [Job]) -> [Job] {
+        jobs.filter { $0.phase == .downloading && $0.isPaused && canOperate(on: $0) }
+    }
+
+    func pauseAll(_ jobs: [Job]) {
+        pausableJobs(in: jobs).forEach(pause)
+    }
+
+    func resumeAll(_ jobs: [Job]) {
+        resumableJobs(in: jobs).forEach(resume)
+    }
+
     func retry(_ job: Job) {
         Task { await coordinator.retry(job.id) }
     }

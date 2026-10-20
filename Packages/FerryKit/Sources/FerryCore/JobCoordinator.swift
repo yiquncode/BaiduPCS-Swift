@@ -726,7 +726,7 @@ public final class JobCoordinator {
         return activity
     }
 
-    /// 文件下载的状态。只有展开的文件行观察它。
+    /// 文件下载的状态。只有详情栏中的文件行观察它。
     public func activity(ofFile id: String) -> FileActivity {
         if let activity = fileActivities[id] { return activity }
         let activity = FileActivity(snapshot: downloads[id])

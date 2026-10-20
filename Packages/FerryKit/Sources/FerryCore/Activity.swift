@@ -11,7 +11,7 @@ public final class JobActivity {
     init() {}
 }
 
-/// 一个文件下载在引擎中的状态。只有展开的文件行观察它。
+/// 一个文件下载在引擎中的状态。只有详情栏中的文件行观察它。
 @MainActor @Observable
 public final class FileActivity {
     public internal(set) var snapshot: DownloadSnapshot?

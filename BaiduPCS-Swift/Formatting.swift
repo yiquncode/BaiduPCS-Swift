@@ -13,14 +13,23 @@ extension JobProgress {
 
     var summary: String {
         var parts = [sizeSummary]
-        if bytesPerSecond > 0 {
-            parts.append("\(Int64(bytesPerSecond).byteCount)/s")
+        if let speedText {
+            parts.append(speedText)
         }
-        if let remainingTime {
-            let text = remainingTime.formatted(.units(allowed: [.hours, .minutes, .seconds], width: .narrow, maximumUnitCount: 2))
-            parts.append("剩余 \(text)")
+        if let remainingTimeText {
+            parts.append("剩余 \(remainingTimeText)")
         }
         return parts.joined(separator: " · ")
+    }
+
+    /// 例如 “2 MB/s”。没有速度时为 nil。
+    var speedText: String? {
+        bytesPerSecond > 0 ? "\(Int64(bytesPerSecond).byteCount)/s" : nil
+    }
+
+    /// 例如 “3分钟”。无法估计时为 nil。
+    var remainingTimeText: String? {
+        remainingTime?.formatted(.units(allowed: [.hours, .minutes, .seconds], width: .narrow, maximumUnitCount: 2))
     }
 }
 
