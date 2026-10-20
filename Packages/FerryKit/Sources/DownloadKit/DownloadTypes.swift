@@ -35,6 +35,10 @@ public protocol DownloadSource: Sendable {
     func resolve(_ request: DownloadRequest) async throws -> ResolvedURL
 }
 
+/// `DownloadSource.resolve` 抛出遵循这个协议的错误时，重试也不会成功（例如登录失效、文件不存在）。
+/// 引擎不再重试，文件下载直接进入 failed。
+public protocol PermanentDownloadSourceError: Error {}
+
 /// 分片大小。分片是领取式的：一个连接下载完一个分片，就领取下一个未完成的分片。
 public enum SegmentSize: Sendable, Hashable {
     /// 按文件大小选择：小于 5 MB 用 256 KB，5–10 MB 用 512 KB，10–15 MB 用 1 MB，更大用 4 MB。
