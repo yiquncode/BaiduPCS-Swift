@@ -124,6 +124,10 @@ final class WebLoginSession: NSObject {
 
     /// 只记录 Cookie 的名字、域名和属性，不记录值。用 `log show --info --predicate 'category == "WebLogin"'` 查看。
     private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Ferry", category: "WebLogin")
+    /// 和 macOS 上的 Chrome 相同。Chrome 的 UA 是精简格式：系统版本固定为 `10_15_7`，
+    /// 只有主版本号，其余为 0。Chrome 更新后，改这里的主版本号。
+    private static let chromeUserAgent =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
     private static let startURL = URL(string: "https://pan.baidu.com/")!
     /// 只有 BDUSS 时加载它。网盘的 STOKEN 在这一步写入。
     private static let diskMainURL = URL(string: "https://pan.baidu.com/disk/main")!
@@ -132,11 +136,8 @@ final class WebLoginSession: NSObject {
         let configuration = WKWebViewConfiguration()
         // 每次登录都是新的环境。关闭 sheet 后网页的 Cookie 全部丢弃，凭据只存在 Keychain 中。
         configuration.websiteDataStore = .nonPersistent()
-        // WKWebView 的默认 UA 没有 `Version/… Safari/…`，部分网站会把它当成未知浏览器。
-        // Safari 的版本号和 macOS 的主版本号相同；`Safari/605.1.15` 在 Safari 中是固定值。
-        let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-        configuration.applicationNameForUserAgent = "Version/\(major).0 Safari/605.1.15"
         webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.customUserAgent = Self.chromeUserAgent
         cookieStore = configuration.websiteDataStore.httpCookieStore
         super.init()
         webView.navigationDelegate = self
