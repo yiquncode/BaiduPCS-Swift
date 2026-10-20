@@ -7,18 +7,14 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     var body: some View {
         TabView {
-            Tab("下载", systemImage: "arrow.down.circle") {
-                DownloadSettingsView()
-            }
-            Tab("网盘", systemImage: "cloud") {
-                NetdiskSettingsView()
-            }
-            Tab("网络", systemImage: "network") {
-                NetworkSettingsView()
-            }
-            Tab("账号", systemImage: "person.crop.circle") {
-                AccountSettingsView()
-            }
+            DownloadSettingsView()
+                .tabItem { Label("下载", systemImage: "arrow.down.circle") }
+            NetdiskSettingsView()
+                .tabItem { Label("网盘", systemImage: "cloud") }
+            NetworkSettingsView()
+                .tabItem { Label("网络", systemImage: "network") }
+            AccountSettingsView()
+                .tabItem { Label("账号", systemImage: "person.crop.circle") }
         }
         .frame(width: 480)
     }

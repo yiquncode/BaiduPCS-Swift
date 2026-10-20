@@ -21,7 +21,7 @@ struct ContentView: View {
             if showsWelcome {
                 WelcomeView()
                     .frame(width: 600, height: 400)
-                    .safeAreaBar(edge: .top, spacing: 0) { Banners() }
+                    .edgeBar(.top) { Banners() }
             } else {
                 MainView()
             }
@@ -56,8 +56,8 @@ struct ContentView: View {
     }
 }
 
-/// 取得视图所在的窗口。SwiftUI 没有改窗口尺寸的接口。
-private struct WindowReader: NSViewRepresentable {
+/// 取得视图所在的窗口。SwiftUI 不能改窗口尺寸，在 macOS 14 上也不能关闭窗口恢复。
+struct WindowReader: NSViewRepresentable {
     @Binding var window: NSWindow?
 
     func makeNSView(context: Context) -> ReaderView {
@@ -102,7 +102,7 @@ struct Banners: View {
     }
 }
 
-/// 一条提示条。没有背景：放在 `safeAreaBar` 中时，由系统的滚动边缘效果把它和内容分开。
+/// 一条提示条。没有背景：放在 `edgeBar` 中，由它把提示条和内容分开。
 struct Banner<Actions: View>: View {
     let message: String
     @ViewBuilder let actions: Actions
@@ -124,6 +124,26 @@ struct Banner<Actions: View>: View {
 }
 
 extension View {
+    /// 在上边缘或下边缘放一条栏，内容从栏下面滚过。macOS 26 用 `safeAreaBar`，系统的滚动边缘效果把栏和内容分开；
+    /// 更早的系统用 `safeAreaInset`，它不处理栏下面的内容，所以给栏加上工具栏材质和分隔线。
+    /// 栏没有内容时不显示背景和分隔线。
+    @ViewBuilder
+    func edgeBar(_ edge: VerticalEdge, @ViewBuilder content: () -> some View) -> some View {
+        if #available(macOS 26, *) {
+            safeAreaBar(edge: edge, spacing: 0, content: content)
+        } else {
+            safeAreaInset(edge: edge, spacing: 0) {
+                content().background {
+                    // 分隔线在栏靠内容的一侧。裁剪后，栏没有内容（高度为 0）时什么也不画。
+                    Rectangle()
+                        .fill(.bar)
+                        .overlay(alignment: edge == .top ? .bottom : .top) { Divider() }
+                        .clipped()
+                }
+            }
+        }
+    }
+
     /// 退出登录前的确认。调用方在有未完成的任务时才把 `isPresented` 设为 true（见 `AppModel.requestLogOut`）。
     func logOutConfirmation(isPresented: Binding<Bool>) -> some View {
         modifier(LogOutConfirmation(isPresented: isPresented))

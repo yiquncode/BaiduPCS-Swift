@@ -347,7 +347,7 @@ final class AppModel {
         sheet = .addLink
     }
 
-    /// 先只检测剪贴板中有没有网址（不会弹出隐私提示），有网址才读取内容。
+    /// 剪贴板中有网址时才读取内容（见 `pasteboardMayContainWebURL`）。
     func shareLinkOnPasteboard() async -> ShareLink? {
         let pasteboard = NSPasteboard.general
         let changeCount = pasteboard.changeCount
@@ -355,14 +355,21 @@ final class AppModel {
             return pasteboardCheck.link
         }
         var link: ShareLink?
-        if pasteboard.accessBehavior != .alwaysDeny,
-           let patterns = try? await pasteboard.detectedPatterns(for: [\.probableWebURL]),
-           patterns.contains(\.probableWebURL),
-           let text = pasteboard.string(forType: .string) {
+        if await pasteboardMayContainWebURL(), let text = pasteboard.string(forType: .string) {
             link = ShareLink.parse(text)
         }
         pasteboardCheck = (changeCount, link)
         return link
+    }
+
+    /// macOS 15.4 起，读取剪贴板内容会弹出隐私提示，所以先只检测有没有网址（不会弹出提示）。用户选择“始终拒绝”时不读取。
+    /// 更早的系统读取剪贴板不弹提示，直接读取。
+    private func pasteboardMayContainWebURL() async -> Bool {
+        guard #available(macOS 15.4, *) else { return true }
+        let pasteboard = NSPasteboard.general
+        guard pasteboard.accessBehavior != .alwaysDeny,
+              let patterns = try? await pasteboard.detectedPatterns(for: [\.probableWebURL]) else { return false }
+        return patterns.contains(\.probableWebURL)
     }
 
     /// 先显示网页登录。

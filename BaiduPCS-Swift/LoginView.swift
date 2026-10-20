@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// 登录窗口。先显示 `AppModel.loginMethod` 指定的方式，可以在网页登录和粘贴 Cookie 登录之间切换。
@@ -5,12 +6,19 @@ struct LoginView: View {
     static let windowID = "login"
 
     @Environment(AppModel.self) private var model
+    @State private var window: NSWindow?
 
     var body: some View {
-        switch model.loginMethod {
-        case .web: WebLoginView { model.loginMethod = .cookie }
-        case .cookie: CookieLoginView { model.loginMethod = .web }
+        Group {
+            switch model.loginMethod {
+            case .web: WebLoginView { model.loginMethod = .cookie }
+            case .cookie: CookieLoginView { model.loginMethod = .web }
+            }
         }
+        .background(WindowReader(window: $window))
+        // 重新启动应用时不恢复登录窗口。场景的 `restorationBehavior(.disabled)` 要 macOS 15，
+        // 而且 SceneBuilder 不能按系统版本二选一，所以在所有系统上都用 AppKit 关掉窗口恢复。
+        .onChange(of: window) { _, window in window?.isRestorable = false }
     }
 }
 

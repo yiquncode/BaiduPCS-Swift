@@ -25,7 +25,6 @@ struct FerryApp: App {
                 .environment(appDelegate.model)
         }
         .windowResizability(.contentSize)
-        .restorationBehavior(.disabled)
         .commandsRemoved()
 
         Settings {

@@ -129,7 +129,7 @@ private struct JobDetail: View {
             }
         }
         .formStyle(.grouped)
-        .safeAreaBar(edge: .bottom, spacing: 0) {
+        .edgeBar(.bottom) {
             HStack {
                 if let action = job.primaryAction, action != .reveal {
                     JobActionButton(job: job, action: action)

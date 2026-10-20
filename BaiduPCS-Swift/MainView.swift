@@ -24,8 +24,8 @@ struct MainView: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
             JobListView(jobs: jobs, category: current, searchText: query, selection: $selection, onRemove: requestRemoval)
-                .safeAreaBar(edge: .top, spacing: 0) { Banners() }
-                .safeAreaBar(edge: .bottom, spacing: 0) { StatusBar() }
+                .edgeBar(.top) { Banners() }
+                .edgeBar(.bottom) { StatusBar() }
                 .navigationTitle(current.title)
                 .navigationSubtitle("\(categoryJobs.count) 个任务")
                 .searchable(text: $searchText, placement: .toolbar, prompt: "搜索任务")
