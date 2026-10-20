@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Synchronization
 
@@ -46,7 +47,13 @@ struct DownloadRecord: Codable, Sendable {
 }
 
 extension DownloadRequest {
-    var temporaryURL: URL { destination.appendingPathExtension("ferrydownload") }
+    /// 和目标路径在同一目录，所以完成后的移动不跨卷。名字由 id 决定：目标路径相同的两个下载不共用临时文件。
+    /// 取 SHA256 的前 16 位十六进制，名字短，不会超过文件名的长度上限。
+    var temporaryURL: URL {
+        let digest = SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
+        return destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(digest.prefix(16)).ferrydownload")
+    }
 }
 
 /// 线程安全的 `DownloadRecord`。下载进行中时，传输任务每收到一块数据就更新它，引擎读取它报告进度。

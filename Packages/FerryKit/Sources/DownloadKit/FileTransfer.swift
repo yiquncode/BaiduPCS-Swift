@@ -379,6 +379,9 @@ actor LinkProvider {
 
 extension FileManager {
     /// 把文件移到 `destination`。目标已存在时不覆盖，改用 "name (1).ext"、"name (2).ext" 等。
+    ///
+    /// 用 `renamex_np` 的 `RENAME_EXCL`：检查和移动是一个原子操作。`moveItem(at:to:)` 先检查再移动，
+    /// 两个目标路径相同的下载同时完成时，后移动的文件会覆盖先移动的。临时文件和目标在同一目录，所以不跨卷。
     func moveItem(_ source: URL, toAvailable destination: URL) throws -> URL {
         let directory = destination.deletingLastPathComponent()
         let base = destination.deletingPathExtension().lastPathComponent
@@ -386,14 +389,14 @@ extension FileManager {
         var candidate = destination
         var number = 0
         while true {
-            do {
-                try moveItem(at: source, to: candidate)
+            if renamex_np(source.path, candidate.path, UInt32(RENAME_EXCL)) == 0 {
                 return candidate
-            } catch CocoaError.fileWriteFileExists {
-                number += 1
-                let name = ext.isEmpty ? "\(base) (\(number))" : "\(base) (\(number)).\(ext)"
-                candidate = directory.appendingPathComponent(name)
             }
+            let code = errno
+            guard code == EEXIST else { throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO) }
+            number += 1
+            let name = ext.isEmpty ? "\(base) (\(number))" : "\(base) (\(number)).\(ext)"
+            candidate = directory.appendingPathComponent(name)
         }
     }
 }

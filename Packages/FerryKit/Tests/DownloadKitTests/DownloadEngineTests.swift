@@ -21,12 +21,13 @@ private let megabyte = 1 << 20
             return states
         }
 
-        try await engine.enqueue(fixture.request("movie.mp4"))
+        let request = fixture.request("movie.mp4")
+        try await engine.enqueue(request)
         let location = try await engine.waitForCompletion(of: "movie.mp4")
 
         #expect(location == fixture.downloadsDirectory.appendingPathComponent("movie.mp4"))
         #expect(fixture.contents("movie.mp4") == data)
-        #expect(!FileManager.default.fileExists(atPath: location.appendingPathExtension("ferrydownload").path))
+        #expect(!FileManager.default.fileExists(atPath: request.temporaryURL.path))
         #expect(try fixture.savedRecords().isEmpty)
 
         let log = fixture.server.log
@@ -308,6 +309,34 @@ private let megabyte = 1 << 20
         #expect(fixture.contents("a (2).bin") == data)
         #expect(fixture.contents("a.bin") == existing)
         #expect(fixture.contents("a (1).bin") == existing)
+    }
+
+    @Test func sameDestinationUsesSeparateTemporaryFiles() async throws {
+        let fixture = Fixture()
+        let first = fixture.addFile("one.bin", size: megabyte)
+        let second = fixture.addFile("two.bin", size: megabyte)
+        fixture.server.setStall(after: 64 * kilobyte)
+        let engine = fixture.makeEngine(.test(files: 2, connections: 2))
+        let destination = fixture.downloadsDirectory.appendingPathComponent("same.bin")
+        var one = fixture.request("one.bin")
+        one.destination = destination
+        var two = fixture.request("two.bin")
+        two.destination = destination
+        #expect(one.temporaryURL != two.temporaryURL)
+        #expect(one.temporaryURL.deletingLastPathComponent().path == fixture.downloadsDirectory.path)
+
+        try await engine.enqueue(one)
+        try await engine.enqueue(two)
+        try await waitUntil("both files downloading") { fixture.server.activeRequests == 4 }
+        fixture.server.setStall(after: nil)
+        let locations = [
+            try await engine.waitForCompletion(of: "one.bin"),
+            try await engine.waitForCompletion(of: "two.bin"),
+        ]
+
+        #expect(Set(locations.map(\.lastPathComponent)) == ["same.bin", "same (1).bin"])
+        #expect(try Data(contentsOf: locations[0]) == first)
+        #expect(try Data(contentsOf: locations[1]) == second)
     }
 
     @Test(arguments: [true, false])
