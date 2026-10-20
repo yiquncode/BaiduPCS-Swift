@@ -184,8 +184,7 @@ import Testing
         #expect(try fixture.store.load().first?.files.allSatisfy(\.isCompleted) == true)
     }
 
-    /// 文件下载完成后、任务列表保存前应用退出。新引擎（约定 C2）保留完成状态，启动时直接记入任务，不再下载。
-    /// 旧引擎完成时就删除状态，这种情况下文件重新下载。两种引擎上任务都能完成。
+    /// 文件下载完成后、任务列表保存前应用退出。引擎保留完成状态，启动时直接记入任务，不再下载。
     @Test func recordsDownloadCompletedBeforeJobListWasSaved() async throws {
         let fixture = Fixture(share: files(1, size: 50_000))
         let job = try await fixture.makeTransferredJob()
@@ -201,17 +200,15 @@ import Testing
             if case .stateChanged(let snapshot) = event, case .completed = snapshot.state { break }
         }
         await engine.shutdown()
-        let keepsCompletedState = try !fixture.stateFiles().isEmpty
+        #expect(try !fixture.stateFiles().isEmpty)
 
         let coordinator = fixture.makeCoordinator()
         await coordinator.start()
         try await coordinator.waitForPhase(.completed, of: job.id)
         let recorded = try #require(coordinator.job(job.id)?.files.first)
         #expect(try Data(contentsOf: #require(recorded.localURL)) == fixture.netdisk.data(at: file.remotePath))
-        if keepsCompletedState {
-            #expect(recorded.localURL?.lastPathComponent == file.relativePath)
-            #expect(fixture.server.requests(for: file.remotePath) == 1)
-            try await waitUntil("completed state removed") { (try? fixture.stateFiles().isEmpty) == true }
-        }
+        #expect(recorded.localURL?.lastPathComponent == file.relativePath)
+        #expect(fixture.server.requests(for: file.remotePath) == 1)
+        try await waitUntil("completed state removed") { (try? fixture.stateFiles().isEmpty) == true }
     }
 }
