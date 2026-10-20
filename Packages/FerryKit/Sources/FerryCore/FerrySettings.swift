@@ -11,15 +11,19 @@ public struct FerrySettings: Codable, Sendable, Hashable {
     public var maxConcurrentFiles: Int
     public var connectionsPerFile: Int
     public var proxy: ProxySettings
+    /// 切换到 Ferry 时，剪贴板中有新复制的分享链接就打开“添加链接”。
+    public var detectsCopiedLinks: Bool
 
     public init(downloadDirectoryBookmark: Data? = nil, transferFolder: String = "/Ferry", cleanupAfterDownload: Bool = false,
-                maxConcurrentFiles: Int = 1, connectionsPerFile: Int = 1, proxy: ProxySettings = ProxySettings()) {
+                maxConcurrentFiles: Int = 1, connectionsPerFile: Int = 1, proxy: ProxySettings = ProxySettings(),
+                detectsCopiedLinks: Bool = true) {
         self.downloadDirectoryBookmark = downloadDirectoryBookmark
         self.transferFolder = transferFolder
         self.cleanupAfterDownload = cleanupAfterDownload
         self.maxConcurrentFiles = maxConcurrentFiles
         self.connectionsPerFile = connectionsPerFile
         self.proxy = proxy
+        self.detectsCopiedLinks = detectsCopiedLinks
     }
 
     /// 缺少或无法解码的字段用默认值，一个字段出错不会丢掉其他设置（例如下载目录的 bookmark）。
@@ -35,6 +39,7 @@ public struct FerrySettings: Codable, Sendable, Hashable {
         maxConcurrentFiles = value(.maxConcurrentFiles) ?? defaults.maxConcurrentFiles
         connectionsPerFile = value(.connectionsPerFile) ?? defaults.connectionsPerFile
         proxy = value(.proxy) ?? defaults.proxy
+        detectsCopiedLinks = value(.detectsCopiedLinks) ?? defaults.detectsCopiedLinks
     }
 
     public static let concurrentFilesRange = 1...10

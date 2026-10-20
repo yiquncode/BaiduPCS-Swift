@@ -9,6 +9,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         Task { await model.start() }
     }
 
+    /// 复制分享链接后切换到 Ferry，自动打开添加链接。
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { await model.detectCopiedLink() }
+    }
+
     /// 关闭主窗口不退出，下载继续。
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false

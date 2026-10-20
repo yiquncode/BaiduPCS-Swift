@@ -24,7 +24,7 @@ struct SettingsView: View {
     }
 }
 
-/// 下载目录和并发数。
+/// 下载目录、并发数和剪贴板检测。
 private struct DownloadSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var isChoosingDirectory = false
@@ -97,6 +97,13 @@ private struct DownloadSettingsView: View {
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                Toggle("检测剪贴板中的分享链接", isOn: $model.settings.detectsCopiedLinks)
+            } footer: {
+                Text("复制分享链接后切换到 Ferry，自动打开“添加链接”并填入链接和提取码。")
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

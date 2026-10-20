@@ -59,6 +59,9 @@ final class AppModel {
     @ObservationIgnored private var sessionReplacement: Task<Void, Never>?
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored private var hasRequestedNotifications = false
+    /// 最近一次读取剪贴板的结果。剪贴板没变时不再读取，所以每次复制最多触发一次系统的剪贴板隐私提示，
+    /// 也最多自动打开一次添加链接。
+    @ObservationIgnored private var pasteboardCheck: (changeCount: Int, link: ShareLink?)?
     /// 设置中的下载目录。应用在选择期间一直持有它的访问权限；任务另外持有各自目录的访问权限。
     @ObservationIgnored private var accessedDirectory: URL?
 
@@ -103,6 +106,8 @@ final class AppModel {
         guard !hasStarted else { return }
         hasStarted = true
         await coordinator.start()
+        // 启动时应用变为活跃的那次检测在任务列表加载前，被跳过，所以加载后再检测一次。
+        if NSApp.isActive { await detectCopiedLink() }
         await revalidate()
     }
 
@@ -329,6 +334,35 @@ final class AppModel {
         } else {
             sheet = .addLink
         }
+    }
+
+    /// 应用变为活跃时调用。剪贴板中有新复制的分享链接时，打开添加链接，由 sheet 填入。
+    /// 未登录、已有 sheet、剪贴板已经读过（包括手动打开添加链接时），或链接已经是一个任务的来源时不打开。
+    func detectCopiedLink() async {
+        guard settings.detectsCopiedLinks, coordinator.isStarted, account != nil, sheet == nil,
+              pasteboardCheck?.changeCount != NSPasteboard.general.changeCount else { return }
+        guard let link = await shareLinkOnPasteboard(), sheet == nil,
+              !coordinator.jobs.contains(where: { $0.link.surl == link.surl }) else { return }
+        openMainWindow?()
+        sheet = .addLink
+    }
+
+    /// 先只检测剪贴板中有没有网址（不会弹出隐私提示），有网址才读取内容。
+    func shareLinkOnPasteboard() async -> ShareLink? {
+        let pasteboard = NSPasteboard.general
+        let changeCount = pasteboard.changeCount
+        if let pasteboardCheck, pasteboardCheck.changeCount == changeCount {
+            return pasteboardCheck.link
+        }
+        var link: ShareLink?
+        if pasteboard.accessBehavior != .alwaysDeny,
+           let patterns = try? await pasteboard.detectedPatterns(for: [\.probableWebURL]),
+           patterns.contains(\.probableWebURL),
+           let text = pasteboard.string(forType: .string) {
+            link = ShareLink.parse(text)
+        }
+        pasteboardCheck = (changeCount, link)
+        return link
     }
 
     /// 默认显示网页登录。

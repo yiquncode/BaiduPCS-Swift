@@ -51,9 +51,13 @@ final class ShareTree {
         self.onError = onError
     }
 
+    /// 根目录第一次加载成功后全选。
     func load(_ node: ShareNode) async {
+        let isFirstLoad = node.children == nil
         if let error = await node.load(using: client, session: session) {
             onError(error)
+        } else if node === root, isFirstLoad, node.children != nil {
+            setAllSelected(true)
         }
     }
 

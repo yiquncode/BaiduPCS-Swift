@@ -1,4 +1,3 @@
-import AppKit
 import BaiduKit
 import FerryCore
 import SwiftUI
@@ -6,12 +5,14 @@ import UniformTypeIdentifiers
 
 /// 添加链接：输入链接和提取码并打开分享，在文件树中勾选要下载的文件，然后下载。
 ///
-/// 打开分享前，回车触发“打开”；打开后，回车触发“下载”。打开后修改链接或提取码，文件树清空。
+/// 从剪贴板填入链接后立即打开分享。打开前，回车触发“打开”；打开后，回车触发“下载”。打开后修改链接或提取码，文件树清空。
 struct AddLinkView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var linkText = ""
     @State private var password = ""
+    /// 分享需要提取码或提取码错误时，焦点移到提取码框。
+    @FocusState private var isPasswordFocused: Bool
     /// 从剪贴板自动填入的链接和提取码。用户改了链接以后不再显示提示。
     @State private var pasted: (link: String, password: String)?
     @State private var openTask: Task<Void, Never>?
@@ -61,8 +62,8 @@ struct AddLinkView: View {
                         closeShare()
                     }
                 PasteButton(payloadType: String.self) { strings in
-                    guard let text = strings.first else { return }
-                    fill(from: text)
+                    guard let text = strings.first, let link = ShareLink.parse(text) else { return }
+                    fillAndOpen(link)
                 }
                 .labelStyle(.iconOnly)
                 .help("粘贴分享链接")
@@ -71,6 +72,7 @@ struct AddLinkView: View {
                         .labelsHidden()
                         .autocorrectionDisabled()
                         .frame(width: 64)
+                        .focused($isPasswordFocused)
                         .onChange(of: password) { closeShare() }
                 }
                 Button("打开", action: openShare)
@@ -192,25 +194,16 @@ struct AddLinkView: View {
         }
     }
 
-    /// 先只检测剪贴板中有没有网址（不会弹出隐私提示），有网址才读取内容。填入后不自动打开。
     private func fillFromPasteboard() async {
-        guard linkText.isEmpty else { return }
-        let pasteboard = NSPasteboard.general
-        guard let patterns = try? await pasteboard.detectedPatterns(for: [\.probableWebURL]),
-              patterns.contains(\.probableWebURL),
-              linkText.isEmpty,
-              let text = pasteboard.string(forType: .string),
-              fill(from: text) else { return }
+        guard linkText.isEmpty, let link = await model.shareLinkOnPasteboard(), linkText.isEmpty else { return }
+        fillAndOpen(link)
         pasted = (linkText, password)
     }
 
-    /// 返回是否找到了分享链接。
-    @discardableResult
-    private func fill(from text: String) -> Bool {
-        guard let link = ShareLink.parse(text) else { return false }
+    private func fillAndOpen(_ link: BaiduKit.ShareLink) {
         linkText = link.url.absoluteString
         password = link.password ?? ""
-        return true
+        openShare()
     }
 
     private func fillPassword() {
@@ -220,7 +213,9 @@ struct AddLinkView: View {
     }
 
     /// 链接或提取码变了，已打开的分享不再对应它们：清空文件树，回到打开前的状态。
+    /// 打开期间输入框不可用，这时的变化来自填入后立即打开，不清空。
     private func closeShare() {
+        guard !isOpening else { return }
         tree = nil
         errorMessage = nil
     }
@@ -253,6 +248,11 @@ struct AddLinkView: View {
                 guard !Task.isCancelled else { return }
                 model.noteError(error)
                 errorMessage = error.localizedDescription
+                if let error = error as? BaiduError, [.passwordRequired, .wrongPassword].contains(error) {
+                    // 先结束“正在打开”，提取码框可用后才能获得焦点。
+                    openTask = nil
+                    isPasswordFocused = true
+                }
             }
         }
     }
@@ -265,7 +265,7 @@ struct AddLinkView: View {
     }
 }
 
-/// 分享的文件树：表头的全选、文件列表和已选摘要。
+/// 分享的文件树：表头的全选和文件列表。
 private struct ShareBrowser: View {
     let tree: ShareTree
 
@@ -287,16 +287,6 @@ private struct ShareBrowser: View {
 
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            Divider()
-            HStack {
-                Text(summary)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
         }
     }
 
@@ -324,16 +314,6 @@ private struct ShareBrowser: View {
         } else {
             ProgressView("正在加载…")
         }
-    }
-
-    private var summary: String {
-        let entries = tree.selectedEntries
-        let folders = entries.count { $0.isDirectory }
-        if folders > 0 {
-            return "已选 \(entries.count) 项（含 \(folders) 个文件夹，大小在转存后确定）"
-        }
-        let size = entries.reduce(Int64(0)) { $0 + $1.size }
-        return "已选 \(entries.count) 项，共 \(size.byteCount)"
     }
 }
 
