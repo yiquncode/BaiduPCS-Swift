@@ -188,10 +188,18 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
     }
 
     static func makeSession() -> URLSession {
+        URLSession(configuration: makeConfiguration())
+    }
+
+    /// `name` 不为 nil 时，这个会话的请求带 `X-Session: name` 头，用来区分请求来自哪个会话。
+    static func makeConfiguration(name: String? = nil) -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubProtocol.self]
         configuration.httpMaximumConnectionsPerHost = 64
-        return URLSession(configuration: configuration)
+        if let name {
+            configuration.httpAdditionalHeaders = ["X-Session": name]
+        }
+        return configuration
     }
 
     var isStopped: Bool { stopped.load(ordering: .acquiring) }

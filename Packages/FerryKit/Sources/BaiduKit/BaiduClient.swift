@@ -4,16 +4,31 @@ import Foundation
 public actor BaiduClient {
     public let credential: Credential
     let session: URLSession
+    private let ownsSession: Bool
     /// `locatedownload` 签名要用的百度 uid。只查一次，查不到时用 `fallbackUID`。
     var uidLookup: Task<UInt64?, Never>?
 
     /// 参考实现的“强制登录”模式在贴吧接口不可用时用这个 uid，服务端可能不严格校验它。
     static let fallbackUID: UInt64 = 24
 
-    /// `session` 用于测试注入。注入的 session 应基于 `defaultConfiguration()`。
-    public init(credential: Credential, session: URLSession? = nil) {
+    /// 客户端用 `configuration` 创建会话，并负责 invalidate 它。
+    public init(credential: Credential, configuration: URLSessionConfiguration = BaiduClient.defaultConfiguration()) {
         self.credential = credential
-        self.session = session ?? URLSession(configuration: Self.defaultConfiguration())
+        session = URLSession(configuration: configuration)
+        ownsSession = true
+    }
+
+    /// 用于测试注入。注入的 session 应基于 `defaultConfiguration()`。客户端不 invalidate 它。
+    public init(credential: Credential, session: URLSession) {
+        self.credential = credential
+        self.session = session
+        ownsSession = false
+    }
+
+    deinit {
+        if ownsSession {
+            session.finishTasksAndInvalidate()
+        }
     }
 
     /// Cookie 由客户端自己管理：系统的 Cookie 存储会按域名过滤，dlink 主机和同名 Cookie 都处理不了。

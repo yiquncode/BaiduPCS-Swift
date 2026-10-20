@@ -9,34 +9,66 @@ public actor DownloadEngine {
         let record: LiveRecord
         var state: DownloadState
         /// 传输任务结束（包括取消后的收尾）前不为 nil。不为 nil 时，只有传输任务写状态文件。
-        var worker: Task<Void, Never>?
+        var worker: Worker?
         var meter = SpeedMeter()
+    }
+
+    private struct Worker {
+        let id: UUID
+        let task: Task<Void, Never>
     }
 
     private let store: StateStore
     private let source: any DownloadSource
-    private let session: URLSession
-    private let ownsSession: Bool
+    /// 只在 `replaceSession(configuration:)` 中改变。进行中的传输继续用开始时的会话。
+    private var session: URLSession
+    private var ownsSession: Bool
     private let settings: SharedConfiguration
     private var configuration: DownloadConfiguration { settings.value }
     private var entries: [String: Entry] = [:]
     private var order: [String] = []
+    /// 所有还没结束的传输任务，包括 `cancel(id:)` 已经从 `entries` 移除、还在收尾的。
+    private var workers: [UUID: Task<Void, Never>] = [:]
+    /// 因为换会话而取消的传输任务。它们结束后，所属的文件下载立即在新会话上重新开始。
+    private var restarting: Set<UUID> = []
     private let broadcaster = EventBroadcaster()
     private var ticker: Task<Void, Never>?
     private var isShutDown = false
 
-    /// - Parameter session: 为 nil 时引擎自己创建一个不使用缓存和 Cookie 存储的会话。
+    /// 引擎用 `sessionConfiguration` 创建会话，并负责 invalidate 它。
     public init(
         stateDirectory: URL,
         source: any DownloadSource,
         configuration: DownloadConfiguration = DownloadConfiguration(),
-        session: URLSession? = nil
+        sessionConfiguration: URLSessionConfiguration = DownloadEngine.defaultSessionConfiguration()
+    ) {
+        self.init(stateDirectory: stateDirectory, source: source, configuration: configuration,
+                  session: URLSession(configuration: sessionConfiguration), ownsSession: true)
+    }
+
+    /// 用于测试注入。引擎不 invalidate 这个会话。
+    public init(
+        stateDirectory: URL,
+        source: any DownloadSource,
+        configuration: DownloadConfiguration = DownloadConfiguration(),
+        session: URLSession
+    ) {
+        self.init(stateDirectory: stateDirectory, source: source, configuration: configuration,
+                  session: session, ownsSession: false)
+    }
+
+    private init(
+        stateDirectory: URL,
+        source: any DownloadSource,
+        configuration: DownloadConfiguration,
+        session: URLSession,
+        ownsSession: Bool
     ) {
         store = StateStore(directory: stateDirectory)
         self.source = source
         settings = SharedConfiguration(configuration)
-        self.session = session ?? Self.makeSession()
-        ownsSession = session == nil
+        self.session = session
+        self.ownsSession = ownsSession
     }
 
     deinit {
@@ -45,7 +77,8 @@ public actor DownloadEngine {
         }
     }
 
-    private static func makeSession() -> URLSession {
+    /// 不使用缓存和 Cookie 存储。应用层在它上面加代理设置。
+    public static func defaultSessionConfiguration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.default
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -55,7 +88,7 @@ public actor DownloadEngine {
         // 并发由引擎控制，不让 URLSession 再排队。
         configuration.httpMaximumConnectionsPerHost = 64
         configuration.timeoutIntervalForRequest = 60
-        return URLSession(configuration: configuration)
+        return configuration
     }
 
     // MARK: - 公开接口
@@ -103,8 +136,8 @@ public actor DownloadEngine {
         entries[id] = entry
         emit(.stateChanged(snapshot(of: entry)))
         if let worker = entry.worker {
-            worker.cancel()
-            await worker.value
+            worker.task.cancel()
+            await worker.task.value
         } else {
             try? store.save(entry.record.value)
         }
@@ -135,8 +168,8 @@ public actor DownloadEngine {
         guard let entry = entries.removeValue(forKey: id) else { return }
         order.removeAll { $0 == id }
         if let worker = entry.worker {
-            worker.cancel()
-            await worker.value
+            worker.task.cancel()
+            await worker.task.value
         }
         if case .completed = entry.state {} else {
             try? FileManager.default.removeItem(at: entry.record.request.temporaryURL)
@@ -150,7 +183,7 @@ public actor DownloadEngine {
     /// 之后引擎不再开始新的下载。
     public func shutdown() async {
         isShutDown = true
-        let workers = entries.values.compactMap(\.worker)
+        let workers = Array(self.workers.values)
         for worker in workers {
             worker.cancel()
         }
@@ -159,6 +192,30 @@ public actor DownloadEngine {
         }
         ticker?.cancel()
         ticker = nil
+    }
+
+    /// 改用 `configuration` 创建的会话，例如代理设置变化后。进行中的下载断开，保存进度后在新会话上从断点继续，
+    /// 状态一直是 running。返回时旧会话上的传输都已结束。
+    public func replaceSession(configuration: URLSessionConfiguration) async {
+        let oldSession = session
+        let ownedOldSession = ownsSession
+        session = URLSession(configuration: configuration)
+        ownsSession = true
+        // 等所有旧会话上的传输结束，包括暂停中和 cancel(id:) 中还在收尾的，再 invalidate 旧会话。
+        // 在已 invalidate 的会话上创建任务会抛出 NSGenericException。
+        let workers = Array(self.workers.values)
+        for entry in entries.values where entry.state == .running {
+            guard let worker = entry.worker else { continue }
+            restarting.insert(worker.id)
+            worker.task.cancel()
+        }
+        for worker in workers {
+            await worker.value
+        }
+        if ownedOldSession {
+            oldSession.finishTasksAndInvalidate()
+        }
+        schedule()
     }
 
     /// 立即生效。调小并发数时不打断进行中的请求，只是不再开始新的。分片大小只影响还没规划分片的下载。
@@ -206,17 +263,23 @@ public actor DownloadEngine {
         )
         entry.state = .running
         entry.meter = SpeedMeter()
-        entry.worker = Task {
+        let workerID = UUID()
+        let task = Task {
             let outcome = await transfer.run()
-            self.finish(id, outcome)
+            self.finish(id, workerID, outcome)
         }
+        workers[workerID] = task
+        entry.worker = Worker(id: workerID, task: task)
         entries[id] = entry
         emit(.stateChanged(snapshot(of: entry)))
         startTicker()
     }
 
-    private func finish(_ id: String, _ outcome: FileTransfer.Outcome) {
-        guard var entry = entries[id] else { return }
+    private func finish(_ id: String, _ workerID: UUID, _ outcome: FileTransfer.Outcome) {
+        workers[workerID] = nil
+        let restarts = restarting.remove(workerID) != nil
+        // cancel(id:) 等待期间，同一个 id 可能已经重新加入队列并开始了新的传输任务。
+        guard var entry = entries[id], entry.worker?.id == workerID else { return }
         entry.worker = nil
         switch outcome {
         case .completed(let url):
@@ -227,10 +290,16 @@ public actor DownloadEngine {
             entry.record.isPaused = true
             try? store.save(entry.record.value)
         case .cancelled:
+            try? store.save(entry.record.value)
             if entry.state == .running {
+                if restarts, !isShutDown {
+                    // 换会话时不经过 queued：界面一直显示下载中，并发名额也不会让给排在后面的下载。
+                    entries[id] = entry
+                    start(id)
+                    return
+                }
                 entry.state = .queued
             }
-            try? store.save(entry.record.value)
         }
         entries[id] = entry
         emit(.stateChanged(snapshot(of: entry)))
