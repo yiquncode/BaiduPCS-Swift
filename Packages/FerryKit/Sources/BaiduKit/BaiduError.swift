@@ -13,6 +13,8 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
     case invalidPasswordFormat
     case passwordRequired
     case wrongPassword
+    /// 列分享目录时 `-9`：提取码错误，或校验提取码得到的 BDCLND 已失效。
+    case wrongOrExpiredPassword
     case shareNotFound
     case shareExpired
     /// 分享页报告分享不可用，但无法区分不存在还是已失效。
@@ -31,6 +33,8 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
     case fileNotFound
     case alreadyExists
     case invalidFileName
+    /// 转存和网盘操作中的 `-7`。
+    case invalidNameOrAccessDenied
     case accessDenied
     case unauthorized
     case noDownloadLink
@@ -63,6 +67,8 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
             "这个分享需要提取码。"
         case .wrongPassword:
             "提取码错误。"
+        case .wrongOrExpiredPassword:
+            "提取码错误或已失效，请重新打开分享。"
         case .shareNotFound:
             "分享页面不存在，请检查链接是否完整。"
         case .shareExpired:
@@ -74,7 +80,7 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
         case .captchaRequired:
             "百度要求输入验证码。请稍后再试，或先在浏览器中打开这个分享。"
         case .verificationTriggered:
-            "触发了百度的人机验证，请稍后再试。"
+            "触发了百度的人机验证，请稍后再试，或先在浏览器中打开这个分享完成验证。"
         case let .transferLimitExceeded(count, limit):
             "转存文件数 \(count) 超过单次上限 \(limit)。"
         case let .transferConflict(name):
@@ -89,6 +95,8 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
             "已存在同名的文件或目录。"
         case .invalidFileName:
             "文件名不合法。"
+        case .invalidNameOrAccessDenied:
+            "文件名不合法，或无权访问这个文件。"
         case .accessDenied:
             "无权访问这个文件。"
         case .unauthorized:
@@ -120,9 +128,13 @@ extension BaiduError {
     init(code: Int, message: String? = nil, endpoint: Endpoint) {
         switch (code, endpoint) {
         case (-9, .shareVerify), (-12, _): self = .wrongPassword
+        case (-9, .shareList), (-9, .shareWXList): self = .wrongOrExpiredPassword
         case (-62, _), (-19, _): self = .captchaRequired
-        case (8001, _): self = .verificationTriggered
-        case (-7, _), (-21, _), (105, _): self = .shareExpired
+        case (8001, _), (9019, _): self = .verificationTriggered
+        // -7 在分享接口中表示分享已删除或取消；在转存和网盘操作中多半是路径非法或无权访问。
+        case (-7, .sharePage), (-7, .shareVerify), (-7, .shareList), (-7, .shareWXList): self = .shareExpired
+        case (-7, _): self = .invalidNameOrAccessDenied
+        case (-21, _), (105, _): self = .shareExpired
         case (-1, _): self = .shareBanned
         case (-6, _), (-4, _), (3, _), (31041, _), (31042, _), (31045, _): self = .loginExpired
         case (132, _): self = .securityVerification

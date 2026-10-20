@@ -168,6 +168,7 @@ extension StubbedNetworkTests {
                 try BaiduClient.checkTransfer(JSON(["errno": 12, "info": [["errno": -32]]]))
             }
             #expect(throws: BaiduError.loginExpired) { try BaiduClient.checkTransfer(JSON(["errno": -6])) }
+            #expect(throws: BaiduError.invalidNameOrAccessDenied) { try BaiduClient.checkTransfer(JSON(["errno": -7])) }
             try BaiduClient.checkTransfer(JSON(["errno": 0]))
         }
     }
