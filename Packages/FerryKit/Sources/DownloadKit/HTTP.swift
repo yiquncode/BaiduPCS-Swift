@@ -33,9 +33,18 @@ enum FetchError: Error {
         switch self {
         case .http(let status, _): [403, 404, 410, 416].contains(status)
         case .invalidResponse: true
+        case .network(let code): Self.linkNetworkErrors.contains(code)
         default: false
         }
     }
+
+    /// 证书或连接问题多半出在这个下载链接的主机上（例如证书无效的 `nb.cache` 主机）。
+    /// 重新获取链接可能换到另一个主机。
+    private static let linkNetworkErrors: Set<URLError.Code> = [
+        .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateNotYetValid,
+        .serverCertificateHasUnknownRoot, .clientCertificateRejected, .secureConnectionFailed,
+        .cannotConnectToHost, .cannotFindHost,
+    ]
 
     var isThrottled: Bool {
         if case .http(let status, _) = self { [429, 509].contains(status) } else { false }

@@ -22,6 +22,8 @@ enum Fault: Sendable {
     case shortBody
     case okWithBody(String)
     case redirect(to: URL)
+    /// 不发送响应，直接以这个错误结束请求。
+    case fail(URLError.Code)
 }
 
 /// 内存中的文件服务器。每个实例用自己的 host，所以并行运行的测试互不干扰。
@@ -111,6 +113,8 @@ final class StubServer: Sendable {
             return respond(status, body: Data(body.utf8))
         case .okWithBody(let body):
             return respond(200, body: Data(body.utf8))
+        case .fail(let code):
+            return client.urlProtocol(connection, didFailWithError: URLError(code))
         case .redirect(let target):
             let response = HTTPURLResponse(url: url, statusCode: 302, httpVersion: "HTTP/1.1", headerFields: ["Location": target.absoluteString])!
             // 新请求不带任何请求头，模拟跨主机重定向时丢失自定义请求头。

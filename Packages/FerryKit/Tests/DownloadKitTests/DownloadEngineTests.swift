@@ -154,6 +154,39 @@ private let megabyte = 1 << 20
         #expect(log.allSatisfy { $0.headers["Cookie"] == "BDUSS=test" })
     }
 
+    @Test(arguments: [
+        URLError.Code.serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateNotYetValid,
+        .serverCertificateHasUnknownRoot, .clientCertificateRejected, .secureConnectionFailed,
+        .cannotConnectToHost, .cannotFindHost,
+    ])
+    func connectionErrorRefreshesLink(_ code: URLError.Code) async throws {
+        let fixture = Fixture(tokens: ["old", "new"])
+        let data = fixture.addFile("a.bin", size: 100 * kilobyte)
+        fixture.server.setFaultRule { request, _ in request.token == "old" ? .fail(code) : nil }
+        let engine = fixture.makeEngine()
+
+        try await engine.enqueue(fixture.request("a.bin"))
+        _ = try await engine.waitForCompletion(of: "a.bin")
+
+        #expect(fixture.contents("a.bin") == data)
+        #expect(fixture.source.resolveCount == 2)
+        #expect(fixture.server.log.map(\.token) == ["old", "new"])
+    }
+
+    @Test func connectionLossKeepsLink() async throws {
+        let fixture = Fixture(tokens: ["old", "new"])
+        let data = fixture.addFile("a.bin", size: 100 * kilobyte)
+        fixture.server.setFaultRule { _, index in index == 0 ? .fail(.networkConnectionLost) : nil }
+        let engine = fixture.makeEngine()
+
+        try await engine.enqueue(fixture.request("a.bin"))
+        _ = try await engine.waitForCompletion(of: "a.bin")
+
+        #expect(fixture.contents("a.bin") == data)
+        #expect(fixture.source.resolveCount == 1)
+        #expect(fixture.server.log.map(\.token) == ["old", "old"])
+    }
+
     @Test func throttledResponsesBackOffLonger() async throws {
         let fixture = Fixture()
         let data = fixture.addFile("a.bin", size: 100 * kilobyte)
