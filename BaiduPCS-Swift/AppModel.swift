@@ -20,8 +20,17 @@ final class AppModel {
     private(set) var downloadDirectoryProblem: String?
     let coordinator: JobCoordinator
 
-    var isShowingLogin = false
-    var isShowingAddLink = false
+    /// 主窗口的 sheet。同一时间只显示一个。
+    enum Sheet: String, Identifiable {
+        case login
+        case addLink
+
+        var id: String { rawValue }
+    }
+
+    var sheet: Sheet?
+    /// 主窗口关闭后，用它重新打开（例如点击 Dock 图标）。
+    @ObservationIgnored var openMainWindow: (() -> Void)?
 
     @ObservationIgnored private let source: BaiduDownloadSource
     @ObservationIgnored private var hasStarted = false
@@ -72,6 +81,8 @@ final class AppModel {
         let credential = try Credential.parse(cookie)
         let client = BaiduClient(credential: credential)
         let account = try await client.validate()
+        // 用户在校验期间取消了登录。
+        try Task.checkCancellation()
         try CredentialStore.save(StoredLogin(credential: credential, account: account))
         apply(client, account: account)
     }
@@ -179,12 +190,33 @@ final class AppModel {
 
     // MARK: - 任务
 
+    /// 未登录时改为打开登录。
     func presentAddLink() {
-        if account == nil {
-            isShowingLogin = true
-        } else {
-            isShowingAddLink = true
+        sheet = account == nil ? .login : .addLink
+    }
+
+    func presentLogin() {
+        sheet = .login
+    }
+
+    /// 百度明确返回登录失效时，显示失效横幅。其他错误不影响登录状态。
+    func noteError(_ error: any Error) {
+        if let error = error as? BaiduError, error == .loginExpired, client != nil {
+            isLoginExpired = true
         }
+    }
+
+    /// 没有未完成的任务时直接退出登录，返回 false；否则返回 true，由界面先确认。
+    func requestLogOut() -> Bool {
+        guard hasUnfinishedJobs else {
+            logOut()
+            return false
+        }
+        return true
+    }
+
+    var hasUnfinishedJobs: Bool {
+        coordinator.jobs.contains { $0.isUnfinished }
     }
 
     func addJob(session: ShareSession, entries: [ShareEntry]) {

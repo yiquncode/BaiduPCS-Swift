@@ -18,16 +18,19 @@ final class ShareNode: Identifiable {
     var id: Int64 { entry?.fsID ?? -1 }
     var isDirectory: Bool { entry?.isDirectory ?? true }
 
-    func load(using client: BaiduClient, session: ShareSession) async {
-        guard children == nil, !isLoading else { return }
+    /// 返回加载失败的错误。
+    func load(using client: BaiduClient, session: ShareSession) async -> (any Error)? {
+        guard children == nil, !isLoading else { return nil }
         isLoading = true
         loadError = nil
         defer { isLoading = false }
         do {
             let entries = try await client.listShare(session, directory: entry)
             children = entries.map(ShareNode.init(entry:))
+            return nil
         } catch {
             loadError = error.localizedDescription
+            return error
         }
     }
 }
@@ -39,14 +42,19 @@ final class ShareTree {
     let session: ShareSession
     let root = ShareNode(entry: nil)
     private(set) var selection: Set<Int64> = []
+    /// 加载失败时调用，例如让界面知道登录已失效。
+    @ObservationIgnored private let onError: (any Error) -> Void
 
-    init(client: BaiduClient, session: ShareSession) {
+    init(client: BaiduClient, session: ShareSession, onError: @escaping (any Error) -> Void) {
         self.client = client
         self.session = session
+        self.onError = onError
     }
 
     func load(_ node: ShareNode) async {
-        await node.load(using: client, session: session)
+        if let error = await node.load(using: client, session: session) {
+            onError(error)
+        }
     }
 
     func isSelected(_ node: ShareNode) -> Bool {
