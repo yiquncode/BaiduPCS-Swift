@@ -1,0 +1,5 @@
+// 工程共享的构建设置，Debug 和 Release 都使用。
+// 签名团队等本机设置不提交，写在同一目录的 Local.xcconfig 中，例如：
+//   DEVELOPMENT_TEAM = <你的 Apple 开发团队 ID>
+// 没有 Local.xcconfig 时，工程仍能构建，只是不能用开发团队签名。
+#include? "Local.xcconfig"

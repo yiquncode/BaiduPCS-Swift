@@ -13,6 +13,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		18F1CB403086E8A000A59465 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
 		18F1CB143086E87B00A59465 /* BaiduPCS-Swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "BaiduPCS-Swift.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -42,8 +43,17 @@
 			isa = PBXGroup;
 			children = (
 				18F1CB163086E87B00A59465 /* BaiduPCS-Swift */,
+				18F1CB413086E8A000A59465 /* Config */,
 				18F1CB153086E87B00A59465 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		18F1CB413086E8A000A59465 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				18F1CB403086E8A000A59465 /* Shared.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 		18F1CB153086E87B00A59465 /* Products */ = {
@@ -142,6 +152,7 @@
 /* Begin XCBuildConfiguration section */
 		18F1CB1D3086E87C00A59465 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 18F1CB403086E8A000A59465 /* Shared.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -205,6 +216,7 @@
 		};
 		18F1CB1E3086E87C00A59465 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 18F1CB403086E8A000A59465 /* Shared.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
