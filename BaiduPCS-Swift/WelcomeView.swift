@@ -1,38 +1,40 @@
-import AppKit
 import SwiftUI
 
-/// 欢迎页。未登录且没有任务时，主窗口只显示它。窗口半透明，没有标题栏，焦点留给图标和名字。
+/// 欢迎页。未登录且没有任务时，主窗口只显示它。窗口半透明，没有标题栏。布局照 macOS 对话框：名字和介绍在左上，“登录”在右下。
 struct WelcomeView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         GeometryReader { proxy in
             ScrollView {
-                VStack(spacing: 24) {
-                    Image(nsImage: NSApp.applicationIconImage)
-                        .resizable()
-                        .frame(width: 96, height: 96)
-                        .accessibilityHidden(true)
-                    VStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("Ferry")
                             .font(.largeTitle.bold())
                         Text("原生、开源、注重隐私的 macOS 网盘客户端")
                             .font(.title3)
                             .foregroundStyle(.secondary)
                     }
-                    .multilineTextAlignment(.center)
-                    Button {
-                        model.presentLogin()
-                    } label: {
-                        Text("登录")
-                            .frame(minWidth: 200)
+                    Spacer(minLength: 32)
+                    Divider()
+                    HStack {
+                        Text("在百度网盘官网登录")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("登录") {
+                            model.presentLogin()
+                        }
+                        .buttonStyle(.glassProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
                     }
-                    .buttonStyle(.glassProminent)
-                    .controlSize(.large)
-                    .keyboardShortcut(.defaultAction)
+                    .padding(.top, 16)
                 }
-                .padding(32)
-                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                .padding(.horizontal, 40)
+                .padding(.top, 32)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .leading)
             }
             .scrollBounceBehavior(.basedOnSize)
         }
