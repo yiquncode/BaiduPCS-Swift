@@ -420,6 +420,37 @@ private let megabyte = 1 << 20
         #expect(fixture.source.resolveCount == 2)
     }
 
+    @Test func permanentResolveErrorFailsWithoutRetry() async throws {
+        let (state, resolveCount) = try await resolveFailure(PermanentError(), retries: 3)
+        #expect(state == .failed(.resolveFailed("登录已失效。")))
+        #expect(resolveCount == 1)
+    }
+
+    @Test func resolveErrorsAreRetriedAndReportTheirDescription() async throws {
+        let (state, resolveCount) = try await resolveFailure(TransientError(), retries: 2)
+        #expect(state == .failed(.resolveFailed("暂时取不到链接。")))
+        #expect(resolveCount == 3)
+
+        let plain = PlainError()
+        let (plainState, _) = try await resolveFailure(plain, retries: 0)
+        #expect(plainState == .failed(.resolveFailed(plain.localizedDescription)))
+    }
+
+    /// 用总是失败的下载源下载一个文件，返回最终状态和调用下载源的次数。
+    private func resolveFailure(_ error: any Error & Sendable, retries: Int) async throws -> (DownloadState?, Int) {
+        let fixture = Fixture()
+        fixture.addFile("a.bin", size: 100 * kilobyte)
+        let source = ThrowingSource(error)
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: source,
+                                    configuration: .test(retries: retries), session: fixture.session)
+        try await engine.enqueue(fixture.request("a.bin"))
+        try await waitUntil("failure") {
+            if case .failed = await engine.snapshot(id: "a.bin")?.state { true } else { false }
+        }
+        #expect(fixture.server.log.isEmpty)
+        return (await engine.snapshot(id: "a.bin")?.state, source.resolveCount)
+    }
+
     @Test func emptyFileCompletesWithoutRequests() async throws {
         let fixture = Fixture()
         fixture.addFile("empty.txt", size: 0)
@@ -451,6 +482,33 @@ private let megabyte = 1 << 20
         #expect(redirected.url.host() == cdnHost)
         #expect(redirected.headers["Cookie"] == "BDUSS=test")
         #expect(redirected.headers["Range"] == "bytes=0-\(data.count - 1)")
+    }
+}
+
+private struct PermanentError: PermanentDownloadSourceError, LocalizedError {
+    var errorDescription: String? { "登录已失效。" }
+}
+
+private struct TransientError: LocalizedError {
+    var errorDescription: String? { "暂时取不到链接。" }
+}
+
+private struct PlainError: Error {}
+
+/// 每次都抛出同一个错误的下载源。
+private final class ThrowingSource: DownloadSource {
+    private let error: any Error & Sendable
+    private let count = Mutex(0)
+
+    init(_ error: any Error & Sendable) {
+        self.error = error
+    }
+
+    var resolveCount: Int { count.withLock { $0 } }
+
+    func resolve(_ request: DownloadRequest) async throws -> ResolvedURL {
+        count.withLock { $0 += 1 }
+        throw error
     }
 }
 

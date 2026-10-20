@@ -8,7 +8,8 @@ enum FetchError: Error {
     case invalidResponse(String)
     /// 服务器对 Range 请求返回了整个文件。
     case rangeIgnored
-    case resolve(String)
+    /// `permanent` 为 true 时，下载源抛出的是 `PermanentDownloadSourceError`，重试也不会成功。
+    case resolve(String, permanent: Bool)
     case disk(String)
 
     init(_ error: any Error) {
@@ -22,6 +23,7 @@ enum FetchError: Error {
     var isRetryable: Bool {
         switch self {
         case .disk, .rangeIgnored: false
+        case .resolve(_, let permanent): !permanent
         default: true
         }
     }
@@ -45,7 +47,7 @@ enum FetchError: Error {
         case .http(let status, let body): .httpStatus(status, message: body)
         case .invalidResponse(let reason): .invalidResponse(reason)
         case .rangeIgnored: .invalidResponse("server ignored the Range header")
-        case .resolve(let reason): .resolveFailed(reason)
+        case .resolve(let reason, _): .resolveFailed(reason)
         case .disk(let reason): .fileSystem(reason)
         }
     }

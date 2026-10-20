@@ -358,7 +358,8 @@ actor LinkProvider {
                 do {
                     return Link(resolved: try await source.resolve(request), generation: generation)
                 } catch {
-                    throw FetchError.resolve(String(describing: error))
+                    let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    throw FetchError.resolve(message, permanent: error is any PermanentDownloadSourceError)
                 }
             }
             pending = task
