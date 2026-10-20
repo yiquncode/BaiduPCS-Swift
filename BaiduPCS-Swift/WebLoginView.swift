@@ -51,6 +51,10 @@ struct WebLoginView: View {
 
             Divider()
             HStack {
+                // 百度的页面有时一直空白，重新加载可以恢复。
+                Button("重新加载") { session?.reload() }
+                    .keyboardShortcut("r")
+                    .disabled(session == nil || loginTask != nil)
                 if loginTask != nil {
                     ProgressView().controlSize(.small)
                     Text("正在校验…").foregroundStyle(.secondary)
