@@ -103,6 +103,11 @@ private struct JobRow: View {
                         .foregroundStyle(.red)
                         .textSelection(.enabled)
                 }
+                if model.coordinator.belongsToOtherAccount(job) {
+                    Text("这个任务属于另一个百度账号，不会对它做转存、清理等网盘操作。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if let warning = job.warning {
                     Text(warning)
                         .font(.caption)

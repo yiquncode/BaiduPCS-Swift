@@ -35,6 +35,8 @@ public final class JobCoordinator {
     public var downloadFolder: DownloadFolder
     /// 未登录时为 nil。
     public var netdisk: (any Netdisk)?
+    /// 当前登录账号的 uk。未登录时为 nil。
+    public var accountUK: Int64?
     /// 启动时任务列表无法读取的说明。界面显示它，用户关闭后清空。
     public private(set) var loadWarning: String?
     /// `start()` 完成前为 false。在此之前，任务操作等待它完成。
@@ -199,6 +201,7 @@ public final class JobCoordinator {
     public func addJob(session: ShareSession, entries: [ShareEntry]) -> Job {
         var job = Job(link: session.link, password: session.password, entries: entries, transferFolder: settings.transferFolder)
         job.downloadFolder = downloadFolder
+        job.accountUK = accountUK
         jobs.insert(job, at: 0)
         save()
         startTransfer(job.id, session: session, removingExisting: false)
@@ -268,7 +271,7 @@ public final class JobCoordinator {
         jobs.removeAll { $0.id == id }
         save()
         closeFolder(of: id)
-        if settings.cleanupAfterDownload, !job.isCleanedUp, let netdisk {
+        if settings.cleanupAfterDownload, !job.isCleanedUp, !belongsToOtherAccount(job), let netdisk {
             do {
                 try await netdisk.delete(paths: [job.remoteDirectory])
             } catch {
@@ -306,6 +309,10 @@ public final class JobCoordinator {
             // 先确认下载目录可以写入，再在网盘中转存。
             _ = try folderURL(for: id)
             guard let netdisk else { throw CoordinatorError.notLoggedIn }
+            guard !belongsToOtherAccount(job) else { throw CoordinatorError.otherAccount }
+            if job.accountUK == nil {
+                update(id) { $0.accountUK = accountUK }
+            }
             if removingExisting {
                 try await netdisk.delete(paths: [job.remoteDirectory])
             }
@@ -524,6 +531,7 @@ public final class JobCoordinator {
             if settings.cleanupAfterDownload, let job = activeJob(id), !job.isCleanedUp {
                 do {
                     guard let netdisk else { throw CoordinatorError.notLoggedIn }
+                    guard !belongsToOtherAccount(job) else { throw CoordinatorError.otherAccount }
                     try await netdisk.delete(paths: [job.remoteDirectory])
                     update(id) { $0.isCleanedUp = true }
                 } catch {
@@ -542,6 +550,12 @@ public final class JobCoordinator {
                 onJobCompleted?(job)
             }
         }
+    }
+
+    /// 任务是用另一个账号创建的。这时不对它做任何网盘操作：任务子目录在那个账号的网盘中。
+    public func belongsToOtherAccount(_ job: Job) -> Bool {
+        guard let owner = job.accountUK, let accountUK else { return false }
+        return owner != accountUK
     }
 
     // MARK: - 下载目录
@@ -655,10 +669,12 @@ enum TransferCheckError: LocalizedError {
 
 enum CoordinatorError: LocalizedError {
     case notLoggedIn
+    case otherAccount
 
     var errorDescription: String? {
         switch self {
         case .notLoggedIn: "未登录百度网盘。"
+        case .otherAccount: "这个任务是用另一个百度账号创建的。请登录那个账号后再操作。"
         }
     }
 }

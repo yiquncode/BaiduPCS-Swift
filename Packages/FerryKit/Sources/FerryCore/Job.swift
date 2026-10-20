@@ -39,6 +39,8 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
     public var isCleanedUp: Bool
     /// 创建任务时的下载目录。之后修改设置中的下载目录不影响这个任务。旧版本创建的任务为 nil。
     public var downloadFolder: DownloadFolder?
+    /// 创建任务时登录的账号的 uk。转存到的是这个账号的网盘。旧版本创建的任务为 nil。
+    public var accountUK: Int64?
 
     public init(link: ShareLink, password: String?, entries: [ShareEntry], transferFolder: String,
                 id: UUID = UUID(), createdAt: Date = .now) {
@@ -73,6 +75,7 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .distantPast
         isCleanedUp = try container.decodeIfPresent(Bool.self, forKey: .isCleanedUp) ?? false
         downloadFolder = try container.decodeIfPresent(DownloadFolder.self, forKey: .downloadFolder)
+        accountUK = try container.decodeIfPresent(Int64.self, forKey: .accountUK)
     }
 
     public static func shortID(_ id: UUID) -> String {

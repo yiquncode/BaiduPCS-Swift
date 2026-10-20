@@ -272,6 +272,8 @@ final class Fixture {
     }
     var store: JobStore { JobStore(fileURL: directory.appendingPathComponent("jobs.json")) }
 
+    static let accountUK: Int64 = 1
+
     static let configuration = DownloadConfiguration(
         maxConcurrentFiles: 4,
         segmentSize: .fixed(1 << 20),
@@ -293,6 +295,7 @@ final class Fixture {
                                          downloadFolder: DownloadFolder(url: downloadFolder ?? downloads),
                                          folderAccess: folderAccess, baseConfiguration: Self.configuration)
         coordinator.netdisk = netdisk
+        coordinator.accountUK = Self.accountUK
         return coordinator
     }
 

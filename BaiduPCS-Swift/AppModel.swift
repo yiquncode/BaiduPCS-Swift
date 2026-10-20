@@ -83,6 +83,7 @@ final class AppModel {
         isLoginExpired = false
         source.setClient(nil)
         coordinator.netdisk = nil
+        coordinator.accountUK = nil
     }
 
     private func apply(_ client: BaiduClient, account: Account) {
@@ -91,6 +92,7 @@ final class AppModel {
         isLoginExpired = false
         source.setClient(client)
         coordinator.netdisk = client
+        coordinator.accountUK = account.uk
     }
 
     /// 网络错误不算失效，只有百度明确说登录失效才提示。
@@ -100,6 +102,7 @@ final class AppModel {
             let account = try await client.validate()
             guard client === self.client else { return }
             self.account = account
+            coordinator.accountUK = account.uk
             let credential = await client.credential
             try? CredentialStore.save(StoredLogin(credential: credential, account: account))
         } catch BaiduError.loginExpired {
