@@ -86,11 +86,12 @@ extension BaiduClient {
         return (json, response)
     }
 
-    /// 网盘接口：`errno` 非 0 时抛错。
-    func panJSON(_ request: BaiduRequest) async throws -> JSON {
+    /// 网盘接口：`errno` 非 0 时抛错。`mapError` 返回非 nil 时用它代替默认的错误。
+    func panJSON(_ request: BaiduRequest, mapError: (Int) -> BaiduError? = { _ in nil }) async throws -> JSON {
         let (json, response) = try await json(request)
         if let errno = json["errno"].int, errno != 0 {
-            throw BaiduError(code: errno, message: json["show_msg"].string ?? json["errmsg"].string, endpoint: request.endpoint)
+            throw mapError(errno)
+                ?? BaiduError(code: errno, message: json["show_msg"].string ?? json["errmsg"].string, endpoint: request.endpoint)
         }
         if response.statusCode >= 400 { throw BaiduError.httpStatus(response.statusCode) }
         return json

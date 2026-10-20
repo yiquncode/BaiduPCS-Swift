@@ -24,7 +24,8 @@ extension BaiduClient {
         cookies = cookies.merging(first.cookies)
 
         guard let password else {
-            // 带提取码的分享会重定向到 /share/init。没有提取码时跳过校验，直接用第一次的字段。
+            // 带提取码的分享会重定向到 /share/init（用 NetdiskUA 时是 /wap/init）。
+            // 没有提取码时跳过校验，直接用第一次的字段。
             if first.redirectedToInit { throw BaiduError.passwordRequired }
             return ShareSession(link: link, password: nil, shareID: first.page.shareID, shareUK: first.page.shareUK,
                                 bdstoken: first.page.bdstoken, cookies: cookies)
@@ -65,7 +66,7 @@ extension BaiduClient {
         if response.statusCode == 404 { throw BaiduError.shareNotFound }
         let html = String(decoding: data, as: UTF8.self)
         let page = try SharePage.parse(html: html, url: response.url)
-        let redirected = response.url?.path.hasSuffix("/share/init") ?? false
+        let redirected = response.url?.path.hasSuffix("/init") ?? false
         return (page, .from(response: response), redirected)
     }
 
@@ -108,7 +109,11 @@ extension BaiduClient {
                 ("shorturl", session.link.surl), ("channel", "chunlei"),
                 ("page", String(page)), ("num", String(Self.sharePageSize)),
             ])
-            let json = try await panJSON(BaiduRequest(url: url, endpoint: .shareList, cookies: cookies(adding: session.cookies)))
+            let request = BaiduRequest(url: url, endpoint: .shareList, cookies: cookies(adding: session.cookies))
+            // 没有校验提取码就列需要提取码的分享时，服务端返回 -9 或 9019。
+            let json = try await panJSON(request) { errno in
+                session.password == nil && [-9, 9019].contains(errno) ? .passwordRequired : nil
+            }
             return (Self.entries(json["list"], in: ""), nil)
         }
     }

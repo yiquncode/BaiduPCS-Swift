@@ -127,10 +127,30 @@ extension StubbedNetworkTests {
             #expect(Stub.shared.requests.count == 1)
         }
 
-        @Test func passwordRequiredWhenRedirectedToInit() async {
-            let client = Fixture.client { _ in .html(Fixture.sharePage(), url: Fixture.initURL) }
+        @Test(arguments: [Fixture.initURL, URL(string: "https://pan.baidu.com/wap/init?surl=qYZEsSc")!])
+        func passwordRequiredWhenRedirectedToInit(_ url: URL) async {
+            let client = Fixture.client { _ in .html(Fixture.sharePage(), url: url) }
             await #expect(throws: BaiduError.passwordRequired) {
                 try await client.openShare(Fixture.link, password: nil)
+            }
+        }
+
+        @Test(arguments: [-9, 9019])
+        func rootListingWithoutPasswordReportsPasswordRequired(_ errno: Int) async {
+            let client = Fixture.client { _ in .json(#"{"errno":\#(errno)}"#) }
+            await #expect(throws: BaiduError.passwordRequired) {
+                try await client.listShare(Fixture.session(password: nil, cookies: []))
+            }
+        }
+
+        @Test func rootListingWithPasswordKeepsErrors() async {
+            let client = Fixture.client { _ in .json(#"{"errno":-9}"#) }
+            await #expect(throws: BaiduError.wrongOrExpiredPassword) {
+                try await client.listShare(Fixture.session())
+            }
+            Stub.shared.install { _ in .json(#"{"errno":9019}"#) }
+            await #expect(throws: BaiduError.verificationTriggered) {
+                try await client.listShare(Fixture.session())
             }
         }
 
