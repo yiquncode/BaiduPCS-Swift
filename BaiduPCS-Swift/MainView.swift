@@ -123,7 +123,7 @@ private struct PauseResumeAllButton: View {
     }
 }
 
-/// 任务列表底部的状态栏：全部任务的总下载速度，以及设置中的并发数。
+/// 任务列表底部的状态栏：全部任务的总下载速度。没有在下载时不显示。
 private struct StatusBar: View {
     @Environment(AppModel.self) private var model
 
@@ -132,21 +132,19 @@ private struct StatusBar: View {
             .filter { $0.phase == .downloading }
             .map { model.coordinator.activity(of: $0.id) }
         let speed = activities.reduce(0) { $0 + $1.progress.bytesPerSecond }
-        HStack(spacing: 12) {
-            if activities.contains(where: \.isRunning), speed > 0 {
+        if activities.contains(where: \.isRunning), speed > 0 {
+            HStack {
                 Label("\(Int64(speed).byteCount)/s", systemImage: "arrow.down")
                     .help("全部任务的总下载速度")
                     .accessibilityLabel("总下载速度 \(Int64(speed).byteCount)/s")
+                Spacer()
             }
-            Spacer()
-            Text("同时下载 \(model.settings.maxConcurrentFiles) 个文件 · 每个文件 \(model.settings.connectionsPerFile) 个连接")
-                .help("在设置中修改")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .lineLimit(1)
+            .padding(.horizontal)
+            .padding(.vertical, 6)
         }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .monospacedDigit()
-        .lineLimit(1)
-        .padding(.horizontal)
-        .padding(.vertical, 6)
     }
 }
