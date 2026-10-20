@@ -108,12 +108,14 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
     }
 
     private let headers: [String: String]
+    private let host: String?
     private let onResponse: ResponseHandler
     private let onData: DataHandler
     private let state = Mutex(State())
 
-    private init(headers: [String: String], onResponse: @escaping ResponseHandler, onData: @escaping DataHandler) {
-        self.headers = headers
+    private init(request: URLRequest, onResponse: @escaping ResponseHandler, onData: @escaping DataHandler) {
+        headers = request.allHTTPHeaderFields ?? [:]
+        host = request.url?.host()?.lowercased()
         self.onResponse = onResponse
         self.onData = onData
     }
@@ -126,7 +128,7 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
         onData: @escaping DataHandler = { _ in }
     ) async throws -> HTTPURLResponse {
         try Task.checkCancellation()
-        let runner = DataTaskRunner(headers: request.allHTTPHeaderFields ?? [:], onResponse: onResponse, onData: onData)
+        let runner = DataTaskRunner(request: request, onResponse: onResponse, onData: onData)
         let task = session.dataTask(with: request)
         task.delegate = runner
         return try await withTaskCancellationHandler {
@@ -146,9 +148,15 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
         newRequest request: URLRequest,
         completionHandler: @escaping @Sendable (URLRequest?) -> Void
     ) {
-        // 跨主机重定向时 URLSession 会丢掉部分自定义请求头（例如 Cookie），这里补上。
+        // 重定向时 URLSession 会丢掉部分自定义请求头（例如 Range），这里补上。
+        // Cookie 只发给原始请求的主机：重定向到其他主机时不带 Cookie，不把登录信息交给第三方主机。
         var request = request
+        let sameHost = request.url?.host()?.lowercased() == host
+        if !sameHost {
+            request.setValue(nil, forHTTPHeaderField: "Cookie")
+        }
         for (field, value) in headers where request.value(forHTTPHeaderField: field) == nil {
+            if !sameHost, field.caseInsensitiveCompare("Cookie") == .orderedSame { continue }
             request.setValue(value, forHTTPHeaderField: field)
         }
         completionHandler(request)

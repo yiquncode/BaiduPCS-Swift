@@ -497,7 +497,7 @@ private let megabyte = 1 << 20
         #expect(fixture.source.resolveCount == 0)
     }
 
-    @Test func redirectKeepsRequestHeaders() async throws {
+    @Test func crossHostRedirectKeepsHeadersExceptCookie() async throws {
         let fixture = Fixture()
         let data = fixture.addFile("a.bin", size: 100 * kilobyte)
         let cdnHost = "cdn-\(fixture.server.host)"
@@ -513,6 +513,25 @@ private let megabyte = 1 << 20
         #expect(fixture.contents("a.bin") == data)
         let redirected = try #require(fixture.server.log.last)
         #expect(redirected.url.host() == cdnHost)
+        #expect(redirected.headers["Cookie"] == nil)
+        #expect(redirected.headers["User-Agent"] == "FerryTests")
+        #expect(redirected.headers["Range"] == "bytes=0-\(data.count - 1)")
+    }
+
+    @Test func sameHostRedirectKeepsCookie() async throws {
+        let fixture = Fixture()
+        let data = fixture.addFile("a.bin", size: 100 * kilobyte)
+        fixture.server.setFaultRule { _, index in
+            index == 0 ? .redirect(to: fixture.server.url("/a.bin?moved=1")) : nil
+        }
+        let engine = fixture.makeEngine()
+
+        try await engine.enqueue(fixture.request("a.bin"))
+        _ = try await engine.waitForCompletion(of: "a.bin")
+
+        #expect(fixture.contents("a.bin") == data)
+        let redirected = try #require(fixture.server.log.last)
+        #expect(redirected.url.query() == "moved=1")
         #expect(redirected.headers["Cookie"] == "BDUSS=test")
         #expect(redirected.headers["Range"] == "bytes=0-\(data.count - 1)")
     }
