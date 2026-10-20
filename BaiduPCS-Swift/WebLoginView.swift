@@ -116,9 +116,11 @@ final class WebLoginSession: NSObject {
     @ObservationIgnored private let cookieStore: WKHTTPCookieStore
     @ObservationIgnored private var isActive = false
     @ObservationIgnored private var hasDeliveredCredential = false
-    @ObservationIgnored private var diskMainNavigation: WKNavigation?
-    @ObservationIgnored private var hasLoadedDiskMain = false
-    @ObservationIgnored private var hasFinishedDiskMain = false
+    @ObservationIgnored private var isChecking = false
+    @ObservationIgnored private var pollTask: Task<Void, Never>?
+    /// 第一次看到 BDUSS 但没有网盘 STOKEN 的时间。
+    @ObservationIgnored private var bdussSeenAt: ContinuousClock.Instant?
+    @ObservationIgnored private var diskMainLoadedAt: ContinuousClock.Instant?
     @ObservationIgnored private var failedURL: URL?
     @ObservationIgnored private var loadingObservation: NSKeyValueObservation?
 
@@ -131,6 +133,10 @@ final class WebLoginSession: NSObject {
     private static let startURL = URL(string: "https://pan.baidu.com/")!
     /// 只有 BDUSS 时加载它。网盘的 STOKEN 在这一步写入。
     private static let diskMainURL = URL(string: "https://pan.baidu.com/disk/main")!
+    /// 看到 BDUSS 后等这么久再加载网盘主页，不打断 passport 的安全验证等后续步骤。
+    private static let settleDelay: Duration = .seconds(5)
+    /// 加载网盘主页后等这么久仍然没有网盘 STOKEN，就提示改用粘贴 Cookie。
+    private static let diskMainTimeout: Duration = .seconds(10)
 
     override init() {
         let configuration = WKWebViewConfiguration()
@@ -152,11 +158,19 @@ final class WebLoginSession: NSObject {
         isActive = true
         cookieStore.add(self)
         webView.load(URLRequest(url: Self.startURL))
+        // 登录后 Cookie 变化的通知不一定到达，网盘页面也可能一直不触发加载完成，所以还要定时检查。
+        pollTask = Task { [weak self] in
+            while (try? await Task.sleep(for: .seconds(1))) != nil {
+                guard let self, self.isActive else { return }
+                self.checkCookies(trigger: "poll")
+            }
+        }
     }
 
     func stop() {
         guard isActive else { return }
         isActive = false
+        pollTask?.cancel()
         onCredential = nil
         cookieStore.remove(self)
         webView.stopLoading()
@@ -174,19 +188,20 @@ final class WebLoginSession: NSObject {
     /// 校验失败后，用户要求再试一次。
     func checkAgain() {
         hasDeliveredCredential = false
-        checkCookies()
+        checkCookies(trigger: "retry")
     }
 
-    /// 有 BDUSS 和网盘的 STOKEN 时交出凭据；只有 BDUSS 时加载一次网盘主页。
-    /// - Parameter pageFinished: 网盘的页面刚加载完成。只在这时加载网盘主页：BDUSS 可能在
-    ///   passport 的安全验证或绑定手机等步骤之前就已写入，这时跳转会打断登录。
-    private func checkCookies(pageFinished: Bool = false) {
+    /// 有 BDUSS 和网盘的 STOKEN 时交出凭据；只有 BDUSS 时加载一次网盘主页。同一时间只有一次检查。
+    private func checkCookies(trigger: String) {
+        guard isActive, !hasDeliveredCredential, !isChecking else { return }
+        isChecking = true
         Task {
-            guard isActive, !hasDeliveredCredential else { return }
+            defer { isChecking = false }
+            let started = ContinuousClock.now
             let cookies = await cookieStore.allCookies()
             // 等待期间可能已经交出凭据，或 sheet 已经关闭。
             guard isActive, !hasDeliveredCredential else { return }
-            Self.logCheck(cookies, page: webView.url, pageFinished: pageFinished)
+            Self.logCheck(cookies, page: webView.url, trigger: trigger, duration: .now - started)
             do {
                 let credential = try Credential.parse(cookies)
                 Self.log.info("credential found")
@@ -194,33 +209,41 @@ final class WebLoginSession: NSObject {
                 isMissingNetdiskSTOKEN = false
                 onCredential?(credential)
             } catch BaiduError.missingSTOKEN {
-                Self.log.info("missing STOKEN, diskMainLoaded=\(self.hasLoadedDiskMain, privacy: .public) diskMainFinished=\(self.hasFinishedDiskMain, privacy: .public)")
-                if !hasLoadedDiskMain {
-                    guard pageFinished, webView.url?.host() == Self.diskMainURL.host() else { return }
-                    hasLoadedDiskMain = true
-                    diskMainNavigation = webView.load(URLRequest(url: Self.diskMainURL))
-                } else if hasFinishedDiskMain {
-                    isMissingNetdiskSTOKEN = true
-                }
+                handleMissingSTOKEN()
             } catch {
                 // 还没有登录。
+                bdussSeenAt = nil
                 Self.log.info("no credential: \(String(describing: error), privacy: .public)")
             }
         }
     }
 
-    private static func logCheck(_ cookies: [HTTPCookie], page: URL?, pageFinished: Bool) {
+    private func handleMissingSTOKEN() {
+        let now = ContinuousClock.now
+        let seenAt = bdussSeenAt ?? now
+        bdussSeenAt = seenAt
+        if let diskMainLoadedAt {
+            if now - diskMainLoadedAt >= Self.diskMainTimeout { isMissingNetdiskSTOKEN = true }
+            return
+        }
+        guard now - seenAt >= Self.settleDelay, webView.url?.host() == Self.diskMainURL.host() else { return }
+        diskMainLoadedAt = now
+        Self.log.info("missing STOKEN, loading /disk/main")
+        webView.load(URLRequest(url: Self.diskMainURL))
+    }
+
+    private static func logCheck(_ cookies: [HTTPCookie], page: URL?, trigger: String, duration: Duration) {
         let summary = cookies
             .map { "\($0.name) domain=\($0.domain) path=\($0.path) secure=\($0.isSecure) expires=\($0.expiresDate.map { "\($0)" } ?? "session")" }
             .sorted()
             .joined(separator: "; ")
-        log.info("check page=\(page?.host() ?? "-", privacy: .public)\(page?.path() ?? "", privacy: .public) finished=\(pageFinished, privacy: .public) cookies=[\(summary, privacy: .public)]")
+        log.info("check trigger=\(trigger, privacy: .public) took=\(duration, privacy: .public) page=\(page?.host() ?? "-", privacy: .public)\(page?.path() ?? "", privacy: .public) cookies=[\(summary, privacy: .public)]")
     }
 }
 
 extension WebLoginSession: WKHTTPCookieStoreObserver {
     func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
-        checkCookies()
+        checkCookies(trigger: "cookiesChanged")
     }
 }
 
@@ -231,17 +254,14 @@ extension WebLoginSession: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if navigation === diskMainNavigation { hasFinishedDiskMain = true }
-        checkCookies(pageFinished: true)
+        checkCookies(trigger: "pageFinished")
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
-        if navigation === diskMainNavigation { hasFinishedDiskMain = true }
         show(error)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
-        if navigation === diskMainNavigation { hasFinishedDiskMain = true }
         show(error)
     }
 
