@@ -130,7 +130,7 @@ enum Fixture {
     static let linkWithPassword = ShareLink.parse("https://pan.baidu.com/s/1qYZEsSc?pwd=ab12")!
     static let initURL = URL(string: "https://pan.baidu.com/share/init?surl=qYZEsSc")!
 
-    static func client(_ handler: @escaping StubHandler) -> BaiduClient {
+    static func client(credential: Credential = credential, _ handler: @escaping StubHandler) -> BaiduClient {
         Stub.shared.install(handler)
         let configuration = BaiduClient.defaultConfiguration()
         configuration.protocolClasses = [StubURLProtocol.self]

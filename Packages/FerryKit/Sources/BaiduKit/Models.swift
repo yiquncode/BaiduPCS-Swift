@@ -29,15 +29,21 @@ public struct ShareSession: Sendable, Codable, Equatable {
     public var bdstoken: String
     /// 会话中服务端新设置的 Cookie（例如 `BDCLND`）。请求时覆盖用户 Cookie 中的同名项。
     public var cookies: [Credential.Cookie]
+    /// 会话中服务端删除的 Cookie 名。请求时不发送这些 Cookie，包括用户 Cookie 中的同名项。
+    public var deletedCookies: Set<String>
 
-    public init(link: ShareLink, password: String?, shareID: Int64, shareUK: Int64, bdstoken: String, cookies: [Credential.Cookie]) {
+    public init(link: ShareLink, password: String?, shareID: Int64, shareUK: Int64, bdstoken: String,
+                cookies: [Credential.Cookie], deletedCookies: Set<String> = []) {
         self.link = link
         self.password = password
         self.shareID = shareID
         self.shareUK = shareUK
         self.bdstoken = bdstoken
         self.cookies = cookies
+        self.deletedCookies = deletedCookies
     }
+
+    var sessionCookies: SessionCookies { SessionCookies(cookies: cookies, deleted: deletedCookies) }
 }
 
 /// 分享中的一个文件或目录。

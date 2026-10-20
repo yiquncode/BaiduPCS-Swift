@@ -64,14 +64,35 @@ extension [Credential.Cookie] {
     var headerValue: String {
         map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
     }
+}
 
-    /// 读取响应的 `Set-Cookie`，忽略已过期（即删除）的 Cookie。
-    static func from(response: HTTPURLResponse) -> [Credential.Cookie] {
+/// 分享会话中服务端设置和删除的 Cookie。
+struct SessionCookies: Equatable {
+    var cookies: [Credential.Cookie] = []
+    /// 服务端用已过期的 `Set-Cookie`（例如 `PANPSC=; expires=...1900...`）删除的 Cookie。之后的请求不再发送同名 Cookie。
+    var deleted: Set<String> = []
+
+    /// 按响应的 `Set-Cookie` 更新。
+    mutating func apply(_ response: HTTPURLResponse) {
         guard let url = response.url,
-              let header = response.value(forHTTPHeaderField: "Set-Cookie") else { return [] }
+              let header = response.value(forHTTPHeaderField: "Set-Cookie") else { return }
         let now = Date()
-        return HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": header], for: url)
-            .filter { ($0.expiresDate ?? .distantFuture) > now }
-            .map { Credential.Cookie(name: $0.name, value: $0.value) }
+        for cookie in HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": header], for: url) {
+            if let expires = cookie.expiresDate, expires <= now {
+                remove(cookie.name)
+            } else {
+                set(Credential.Cookie(name: cookie.name, value: cookie.value))
+            }
+        }
+    }
+
+    mutating func set(_ cookie: Credential.Cookie) {
+        cookies = cookies.merging([cookie])
+        deleted.remove(cookie.name)
+    }
+
+    mutating func remove(_ name: String) {
+        cookies.removeAll { $0.name == name }
+        deleted.insert(name)
     }
 }

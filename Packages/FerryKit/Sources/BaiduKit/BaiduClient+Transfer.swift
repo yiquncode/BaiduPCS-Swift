@@ -19,7 +19,7 @@ extension BaiduClient {
         let fsIDs = "[" + entries.map { String($0.fsID) }.joined(separator: ",") + "]"
         let request = BaiduRequest.form(
             [("fsidlist", fsIDs), ("path", directory)],
-            url: url, endpoint: .shareTransfer, cookies: cookies(adding: session.cookies),
+            url: url, endpoint: .shareTransfer, cookies: cookies(adding: session.sessionCookies),
             headers: ["Referer": session.link.url.absoluteString]
         )
         let (json, _) = try await json(request)

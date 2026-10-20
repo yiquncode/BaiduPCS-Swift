@@ -60,6 +60,38 @@ extension StubbedNetworkTests {
             #expect(list.cookies["BDCLND"] == "from%2Fcookie")
         }
 
+        @Test func expiredSetCookieRemovesCookieFromLaterRequests() async throws {
+            let credential = try Credential.parse("BDUSS=test_bduss; STOKEN=test_stoken; PANPSC=user")
+            let deleting = "PANPSC=; expires=Fri, 01-Apr-1900 00:00:00 GMT; path=/; domain=pan.baidu.com; HttpOnly;"
+            let client = Fixture.client(credential: credential) { request in
+                switch request.path {
+                case "/s/1qYZEsSc":
+                    var page = StubResponse.html(Fixture.sharePage(), url: Fixture.initURL)
+                    page.headers["Set-Cookie"] = deleting
+                    return page
+                case "/share/verify":
+                    return .json(#"{"errno":0,"randsk":"r"}"#)
+                case "/share/list":
+                    return .json(Fixture.listJSON([(1, "a.zip", "/sharer/a.zip", false, 10)]))
+                case "/share/transfer":
+                    return .json(#"{"errno":0}"#)
+                default:
+                    return .json("{}")
+                }
+            }
+
+            let session = try await client.openShare(Fixture.link, password: "ab12")
+            #expect(session.deletedCookies == ["PANPSC"])
+            let entries = try await client.listShare(session)
+            try await client.transfer(session, entries: entries, to: "/Ferry/job")
+
+            let requests = Stub.shared.requests
+            #expect(requests.first?.cookies["PANPSC"] == "user")
+            let later = requests.dropFirst().filter { $0.url.host() == "pan.baidu.com" }
+            #expect(Set(later.map(\.path)) == ["/share/verify", "/s/1qYZEsSc", "/share/list", "/share/transfer"])
+            #expect(later.allSatisfy { $0.cookies["PANPSC"] == nil && $0.cookies["BDUSS"] == "test_bduss" })
+        }
+
         @Test func openShareFallsBackToRandsk() async throws {
             let client = Fixture.client(Self.passwordShareHandler(verify: .json(#"{"errno":0,"randsk":"rand%2Bsk"}"#)))
             let session = try await client.openShare(Fixture.link, password: "ab12")

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import BaiduKit
 
@@ -43,6 +44,25 @@ struct CredentialTests {
     @Test func rejectsMissingSTOKEN() {
         #expect(throws: BaiduError.missingSTOKEN) { try Credential.parse("BDUSS=b") }
         #expect(BaiduError.missingSTOKEN.errorDescription?.contains("pan.baidu.com") == true)
+    }
+
+    @Test func expiredSetCookieDeletesCookie() {
+        let url = URL(string: "https://pan.baidu.com/s/1qYZEsSc")!
+        func response(_ setCookie: String) -> HTTPURLResponse {
+            HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Set-Cookie": setCookie])!
+        }
+        var session = SessionCookies()
+        session.apply(response(
+            "PANPSC=; expires=Fri, 01-Apr-1900 00:00:00 GMT; path=/; domain=pan.baidu.com; HttpOnly;, "
+                + "csrfToken=abc; path=/; secure, "
+                + "BAIDUID=X:FG=1; expires=Thu, 01-Jan-2099 00:00:00 GMT; path=/; domain=.baidu.com"))
+        #expect(session.cookies.headerValue == "csrfToken=abc; BAIDUID=X:FG=1")
+        #expect(session.deleted == ["PANPSC"])
+
+        // 之后再设置同名 Cookie 时，它不再算删除；删除会话中设置过的 Cookie 时，把它移除。
+        session.apply(response("PANPSC=new; path=/, csrfToken=; expires=Fri, 01-Apr-1900 00:00:00 GMT; path=/"))
+        #expect(session.cookies.headerValue == "BAIDUID=X:FG=1; PANPSC=new")
+        #expect(session.deleted == ["csrfToken"])
     }
 
     @Test func mergingReplacesValuesInPlace() {

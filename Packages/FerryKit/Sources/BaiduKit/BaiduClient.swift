@@ -47,9 +47,9 @@ struct BaiduRequest {
 }
 
 extension BaiduClient {
-    /// 用户的全部 Cookie 加上会话中新增的 Cookie，同名取最新。
-    func cookies(adding extra: [Credential.Cookie] = []) -> [Credential.Cookie] {
-        credential.cookies.merging(extra)
+    /// 用户的全部 Cookie 加上会话中新增的 Cookie，同名取最新。会话中删除的 Cookie 不发送。
+    func cookies(adding session: SessionCookies = SessionCookies()) -> [Credential.Cookie] {
+        credential.cookies.merging(session.cookies).filter { !session.deleted.contains($0.name) }
     }
 
     func send(_ request: BaiduRequest) async throws -> (Data, HTTPURLResponse) {

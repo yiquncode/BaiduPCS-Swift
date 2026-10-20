@@ -19,24 +19,22 @@ extension BaiduClient {
             password = valid
         }
 
-        var cookies: [Credential.Cookie] = []
-        let first = try await fetchSharePage(link, referer: "\(Host.pan)/disk/home", sessionCookies: cookies)
-        cookies = cookies.merging(first.cookies)
+        var cookies = SessionCookies()
+        let first = try await fetchSharePage(link, referer: "\(Host.pan)/disk/home", cookies: &cookies)
 
         guard let password else {
             // 带提取码的分享会重定向到 /share/init（用 NetdiskUA 时是 /wap/init）。
             // 没有提取码时跳过校验，直接用第一次的字段。
             if first.redirectedToInit { throw BaiduError.passwordRequired }
             return ShareSession(link: link, password: nil, shareID: first.page.shareID, shareUK: first.page.shareUK,
-                                bdstoken: first.page.bdstoken, cookies: cookies)
+                                bdstoken: first.page.bdstoken, cookies: cookies.cookies, deletedCookies: cookies.deleted)
         }
 
-        cookies = cookies.merging(try await verify(link, password: password, page: first.page, sessionCookies: cookies))
+        try await verify(link, password: password, page: first.page, cookies: &cookies)
 
-        let second = try await fetchSharePage(link, referer: "\(Host.pan)/share/init?surl=\(link.surl)", sessionCookies: cookies)
-        cookies = cookies.merging(second.cookies)
+        let second = try await fetchSharePage(link, referer: "\(Host.pan)/share/init?surl=\(link.surl)", cookies: &cookies)
         return ShareSession(link: link, password: password, shareID: second.page.shareID, shareUK: second.page.shareUK,
-                            bdstoken: second.page.bdstoken, cookies: cookies)
+                            bdstoken: second.page.bdstoken, cookies: cookies.cookies, deletedCookies: cookies.deleted)
     }
 
     /// 列出分享中的一层目录。`directory` 为 `nil` 时列根目录。自动翻页。
@@ -57,21 +55,24 @@ extension BaiduClient {
 
     // MARK: - 分享页与提取码
 
-    private func fetchSharePage(_ link: ShareLink, referer: String, sessionCookies: [Credential.Cookie])
-        async throws -> (page: SharePage, cookies: [Credential.Cookie], redirectedToInit: Bool) {
+    /// 读取页面字段，并按响应的 `Set-Cookie` 更新 `cookies`。
+    private func fetchSharePage(_ link: ShareLink, referer: String, cookies sessionCookies: inout SessionCookies)
+        async throws -> (page: SharePage, redirectedToInit: Bool) {
         // 分享页必须用 NetdiskUA：浏览器 UA 会拿到不含 loginstate 的登录页。
         let request = BaiduRequest(url: link.url, endpoint: .sharePage, cookies: cookies(adding: sessionCookies),
                                    headers: ["Referer": referer])
         let (data, response) = try await send(request)
+        sessionCookies.apply(response)
         if response.statusCode == 404 { throw BaiduError.shareNotFound }
         let html = String(decoding: data, as: UTF8.self)
         let page = try SharePage.parse(html: html, url: response.url)
         let redirected = response.url?.path.hasSuffix("/init") ?? false
-        return (page, .from(response: response), redirected)
+        return (page, redirected)
     }
 
-    private func verify(_ link: ShareLink, password: String, page: SharePage, sessionCookies: [Credential.Cookie])
-        async throws -> [Credential.Cookie] {
+    /// 校验提取码，并按响应更新 `cookies`。
+    private func verify(_ link: ShareLink, password: String, page: SharePage, cookies sessionCookies: inout SessionCookies)
+        async throws {
         let url = URLEncoding.url("\(Host.pan)/share/verify", [
             ("shareid", String(page.shareID)),
             ("time", String(Int64(Date().timeIntervalSince1970 * 1000))),
@@ -90,11 +91,12 @@ extension BaiduClient {
         }
 
         // BDCLND 优先取自 Set-Cookie；没有时用 randsk。randsk 已经是编码后的值，不再编码。
-        var cookies = [Credential.Cookie].from(response: response)
-        if !cookies.contains(where: { $0.name == "BDCLND" }), let randsk = json["randsk"].string, !randsk.isEmpty {
-            cookies.append(Credential.Cookie(name: "BDCLND", value: randsk))
+        var changes = SessionCookies()
+        changes.apply(response)
+        sessionCookies.apply(response)
+        if !changes.cookies.contains(where: { $0.name == "BDCLND" }), let randsk = json["randsk"].string, !randsk.isEmpty {
+            sessionCookies.set(Credential.Cookie(name: "BDCLND", value: randsk))
         }
-        return cookies
     }
 
     // MARK: - 列目录
@@ -107,7 +109,7 @@ extension BaiduClient {
             ("bdstoken", session.bdstoken), ("root", "1"), ("web", "5"), ("app_id", Host.panAppID),
             ("shorturl", session.link.surl), ("channel", "chunlei"),
         ])
-        let request = BaiduRequest(url: url, endpoint: .shareList, cookies: cookies(adding: session.cookies))
+        let request = BaiduRequest(url: url, endpoint: .shareList, cookies: cookies(adding: session.sessionCookies))
         // 没有校验提取码就列需要提取码的分享时，服务端返回 -9 或 9019。
         let json = try await panJSON(request) { errno in
             session.password == nil && [-9, 9019].contains(errno) ? .passwordRequired : nil
@@ -127,7 +129,7 @@ extension BaiduClient {
                     ("uk", String(session.shareUK)), ("shareid", String(session.shareID)),
                     ("desc", "1"), ("order", "other"), ("bdstoken", "null"), ("showempty", "0"),
                 ])
-                let json = try await panJSON(BaiduRequest(url: url, endpoint: .shareList, cookies: cookies(adding: session.cookies)))
+                let json = try await panJSON(BaiduRequest(url: url, endpoint: .shareList, cookies: cookies(adding: session.sessionCookies)))
                 return (Self.entries(json["list"], in: relative), nil)
             }
         case .wxList:
