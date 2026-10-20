@@ -81,7 +81,10 @@ enum URLEncoding {
 
     static func url(_ base: String, rawQuery: String) -> URL {
         let string = rawQuery.isEmpty ? base : "\(base)?\(rawQuery)"
-        guard let url = URL(string: string) else { preconditionFailure("Invalid URL: \(string)") }
+        // 宽松模式遇到非法字符时会把整个 query 重新编码，已有的 `%2F` 变成 `%252F`。
+        guard let url = URL(string: string, encodingInvalidCharacters: false) else {
+            preconditionFailure("Invalid URL: \(string)")
+        }
         return url
     }
 
