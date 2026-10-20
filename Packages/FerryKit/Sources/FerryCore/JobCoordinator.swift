@@ -78,7 +78,11 @@ public final class JobCoordinator {
     /// 文件下载 id → (任务 id, 文件下标)。任务列表或文件列表变化后重建。
     @ObservationIgnored private var fileLocations: [String: (job: UUID, file: Int)] = [:]
     @ObservationIgnored private var jobIndices: [UUID: Int] = [:]
+    /// 每个任务的计数。和索引一起重建，文件下载变化时增量更新（见 `changeFile`）。
+    @ObservationIgnored private var tallies: [UUID: JobTally] = [:]
     @ObservationIgnored private var isIndexStale = true
+    /// 测试用：每次更新计数后，从头重新计算并比较，不一致时调用。为 nil 时不比较。
+    @ObservationIgnored var tallyMismatchHandler: ((String) -> Void)?
     @ObservationIgnored private var jobActivities: [UUID: JobActivity] = [:]
     @ObservationIgnored private var fileActivities: [String: FileActivity] = [:]
     @ObservationIgnored private var changedJobs: Set<UUID> = []
@@ -167,15 +171,13 @@ public final class JobCoordinator {
         }
         var finished: [String] = []
         for snapshot in restored {
-            guard let (jobIndex, fileIndex) = locate(snapshot.id) else {
+            guard locate(snapshot.id) != nil else {
                 await engine.cancel(id: snapshot.id)
                 continue
             }
             if case .completed(let url) = snapshot.state {
                 // 上次完成后、写入任务列表前应用退出了。
-                if jobs[jobIndex].files[fileIndex].localURL == nil {
-                    jobs[jobIndex].files[fileIndex].localURL = url
-                }
+                recordCompletion(of: snapshot.id, at: url)
                 finished.append(snapshot.id)
             } else {
                 setSnapshot(snapshot.id, snapshot)
@@ -202,9 +204,8 @@ public final class JobCoordinator {
     public func shutdown() async {
         await engine.shutdown()
         for snapshot in await engine.snapshots() {
-            if case .completed(let url) = snapshot.state, let (jobIndex, fileIndex) = locate(snapshot.id),
-               jobs[jobIndex].files[fileIndex].localURL == nil {
-                jobs[jobIndex].files[fileIndex].localURL = url
+            if case .completed(let url) = snapshot.state {
+                recordCompletion(of: snapshot.id, at: url)
             }
         }
         save()
@@ -512,12 +513,10 @@ public final class JobCoordinator {
             guard locate(snapshot.id) != nil else { return }
             setSnapshot(snapshot.id, snapshot)
         case .stateChanged(let snapshot):
-            guard let (jobIndex, fileIndex) = locate(snapshot.id) else { return }
+            guard let (jobIndex, _) = locate(snapshot.id) else { return }
             let jobID = jobs[jobIndex].id
             if case .completed(let url) = snapshot.state {
-                if jobs[jobIndex].files[fileIndex].localURL == nil {
-                    jobs[jobIndex].files[fileIndex].localURL = url
-                }
+                recordCompletion(of: snapshot.id, at: url)
                 // 完成状态写入任务列表后，引擎才删除这个文件下载的状态。
                 cancelAfterSave.append(snapshot.id)
                 scheduleSave()
@@ -530,36 +529,77 @@ public final class JobCoordinator {
     }
 
     private func setSnapshot(_ fileID: String, _ snapshot: DownloadSnapshot?) {
-        downloads[fileID] = snapshot
+        changeFile(fileID) { downloads[fileID] = snapshot }
         fileActivities[fileID]?.snapshot = snapshot
-        if let location = locateIndexed(fileID) {
-            markChanged(location.job)
+    }
+
+    /// 把引擎报告的最终路径记入任务。已经记入时不变。
+    private func recordCompletion(of fileID: String, at url: URL) {
+        guard let (jobIndex, fileIndex) = locate(fileID), jobs[jobIndex].files[fileIndex].localURL == nil else { return }
+        changeFile(fileID) { jobs[jobIndex].files[fileIndex].localURL = url }
+    }
+
+    /// 修改文件下载在 `downloads` 中的状态或它的 `localURL` 时都经过这里：所在任务的计数先减去这个文件原来的部分，
+    /// 修改后再加上新的部分。不属于任何任务的文件下载不影响计数。
+    private func changeFile(_ fileID: String, _ change: () -> Void) {
+        // 先重建索引（同时重建计数），减去的才是修改前的部分。
+        guard let location = locateIndexed(fileID), let jobIndex = jobIndices[location.job] else {
+            change()
+            return
         }
+        tallies[location.job]?.remove(jobs[jobIndex].files[location.file], at: location.file, downloads[fileID])
+        change()
+        tallies[location.job]?.add(jobs[jobIndex].files[location.file], at: location.file, downloads[fileID])
+        markChanged(location.job)
+        verifyTally(of: location.job)
     }
 
     /// 根据文件下载的状态更新任务的阶段。
     private func evaluate(_ id: Job.ID) {
-        guard let job = activeJob(id), job.phase == .downloading, !finishing.contains(id) else { return }
-        let pending = job.files.filter { !$0.isCompleted }
-        if pending.isEmpty {
-            finish(id)
-            return
+        guard let job = activeJob(id), job.phase == .downloading, !finishing.contains(id),
+              let tally = tallies[id] else { return }
+        let outcome = outcome(of: job, tally)
+        if let handler = tallyMismatchHandler {
+            let scanned = scannedOutcome(of: job)
+            if outcome != scanned { handler("job \(id): outcome \(outcome), scanning gives \(scanned)") }
         }
-        guard !job.isPaused else { return }
-        let states = pending.compactMap { downloads[$0.id]?.state }
-        if states.contains(.paused) {
-            // 任务没暂停，文件下载却暂停了（例如启动时恢复为暂停）。让它们继续，否则任务一直停在“下载中”。
-            reconcile(id)
-            return
+        switch outcome {
+        case .finish: finish(id)
+        case .reconcile: reconcile(id)
+        case .fail(let failure): fail(id, step: .download, failure)
+        case .wait: break
         }
+    }
+
+    /// 任务下一步要做的事。只读计数，不遍历文件列表。
+    private func outcome(of job: Job, _ tally: JobTally) -> Outcome {
+        if tally.pendingCount == 0 { return .finish }
+        guard !job.isPaused else { return .wait }
+        // 任务没暂停，文件下载却暂停了（例如启动时恢复为暂停）。让它们继续，否则任务一直停在“下载中”。
+        if tally.pausedCount > 0 { return .reconcile }
         // 还有文件下载没加入引擎（例如正在逐个加入）时，结果还没确定。
-        guard states.count == pending.count, !states.contains(where: { $0 == .queued || $0 == .running }) else { return }
-        let failure = states.lazy.compactMap { state -> DownloadFailure? in
-            if case .failed(let failure) = state { failure } else { nil }
+        guard tally.trackedCount == tally.pendingCount, tally.queuedCount == 0, tally.runningFiles.isEmpty,
+              tally.failedCount > 0 else { return .wait }
+        // 只在任务失败时遍历一次：失败后任务不再是“下载中”，不再到这里。
+        return firstFailure(in: job).map(Outcome.fail) ?? .wait
+    }
+
+    /// 测试用：不用计数，遍历文件列表得出下一步。结果应和 `outcome(of:_:)` 相同。
+    private func scannedOutcome(of job: Job) -> Outcome {
+        let pending = job.files.filter { !$0.isCompleted }
+        if pending.isEmpty { return .finish }
+        guard !job.isPaused else { return .wait }
+        let states = pending.compactMap { downloads[$0.id]?.state }
+        if states.contains(.paused) { return .reconcile }
+        guard states.count == pending.count, !states.contains(where: { $0 == .queued || $0 == .running }) else { return .wait }
+        return firstFailure(in: job).map(Outcome.fail) ?? .wait
+    }
+
+    /// 按文件顺序，第一个失败的没完成的文件下载的原因。
+    private func firstFailure(in job: Job) -> DownloadFailure? {
+        job.files.lazy.filter { !$0.isCompleted }.compactMap { file -> DownloadFailure? in
+            if case .failed(let failure) = self.downloads[file.id]?.state { failure } else { nil }
         }.first
-        if let failure {
-            fail(id, step: .download, failure)
-        }
     }
 
     private func reconcile(_ id: Job.ID) {
@@ -691,13 +731,24 @@ public final class JobCoordinator {
     private func rebuildIndex() {
         fileLocations = [:]
         jobIndices = [:]
+        tallies = [:]
         for (jobIndex, job) in jobs.enumerated() {
             jobIndices[job.id] = jobIndex
             for (fileIndex, file) in job.files.enumerated() {
                 fileLocations[file.id] = (job.id, fileIndex)
             }
+            tallies[job.id] = JobTally(files: job.files, downloads: downloads)
         }
         isIndexStale = false
+    }
+
+    /// 测试用：从头计算任务的计数，和增量维护的计数比较。`tallyMismatchHandler` 为 nil 时不计算。
+    private func verifyTally(of id: Job.ID) {
+        guard let handler = tallyMismatchHandler, let job = job(id) else { return }
+        let expected = JobTally(files: job.files, downloads: downloads)
+        if tallies[id] != expected {
+            handler("job \(id): tally \(String(describing: tallies[id])), recomputed \(expected)")
+        }
     }
 
     /// 立即写入任务列表，然后从引擎取消已记入任务的完成的文件下载。
@@ -737,7 +788,7 @@ public final class JobCoordinator {
     public func activity(of id: Job.ID) -> JobActivity {
         if let activity = jobActivities[id] { return activity }
         let activity = JobActivity()
-        if let job = job(id) { refresh(activity, for: job) }
+        refresh(activity, for: id)
         jobActivities[id] = activity
         return activity
     }
@@ -764,15 +815,25 @@ public final class JobCoordinator {
         let changed = changedJobs
         changedJobs = []
         for id in changed {
-            guard let activity = jobActivities[id], let job = job(id) else { continue }
-            refresh(activity, for: job)
+            guard let activity = jobActivities[id] else { continue }
+            refresh(activity, for: id)
         }
     }
 
-    private func refresh(_ activity: JobActivity, for job: Job) {
-        let progress = progress(of: job)
+    private func refresh(_ activity: JobActivity, for id: Job.ID) {
+        guard let job = job(id), let tally = tallies[id] else { return }
+        // 引擎只给下载中的文件报告非 0 的速度，所以只加这些文件。按文件顺序加，结果和 `progress(of:)` 完全相同。
+        let speed = tally.runningFiles.sorted().reduce(0.0) { $0 + (downloads[job.files[$1].id]?.bytesPerSecond ?? 0) }
+        let progress = JobProgress(receivedBytes: tally.completedBytes + tally.receivedBytes, totalBytes: tally.totalBytes,
+                                   bytesPerSecond: speed)
+        let isRunning = !tally.runningFiles.isEmpty
+        if let handler = tallyMismatchHandler {
+            let scanned = (self.progress(of: job), job.files.contains { !$0.isCompleted && downloads[$0.id]?.state == .running })
+            if progress != scanned.0 || isRunning != scanned.1 {
+                handler("job \(job.id): activity \(progress) \(isRunning), scanning gives \(scanned.0) \(scanned.1)")
+            }
+        }
         if activity.progress != progress { activity.progress = progress }
-        let isRunning = job.files.contains { !$0.isCompleted && downloads[$0.id]?.state == .running }
         if activity.isRunning != isRunning { activity.isRunning = isRunning }
     }
 
@@ -783,6 +844,69 @@ public final class JobCoordinator {
         default: error.localizedDescription
         }
     }
+}
+
+/// 一个任务的文件下载计数。`evaluate` 和任务的汇总进度只读它，不遍历文件列表：
+/// 每个事件都遍历时，几千个文件的任务会让主线程忙几十秒。
+///
+/// 每个文件的部分只由它是否完成和它在 `downloads` 中的状态决定，所以修改其中之一时，先减去原来的部分，再加上新的部分。
+private struct JobTally: Equatable {
+    var totalBytes: Int64 = 0
+    /// 没完成（没有 `localURL`）的文件。
+    var pendingCount = 0
+    var completedBytes: Int64 = 0
+    /// 下面几项只算没完成、并且在 `downloads` 中有状态的文件。
+    var trackedCount = 0
+    var queuedCount = 0
+    var pausedCount = 0
+    var failedCount = 0
+    var receivedBytes: Int64 = 0
+    /// 正在下载的文件的下标。速度不在这里累加：浮点数反复加减会留下误差，没有下载时仍显示很小的速度。
+    var runningFiles: Set<Int> = []
+
+    init(files: [JobFile], downloads: [String: DownloadSnapshot]) {
+        for (index, file) in files.enumerated() {
+            add(file, at: index, downloads[file.id])
+        }
+    }
+
+    mutating func add(_ file: JobFile, at index: Int, _ snapshot: DownloadSnapshot?) {
+        apply(file, at: index, snapshot, sign: 1)
+    }
+
+    mutating func remove(_ file: JobFile, at index: Int, _ snapshot: DownloadSnapshot?) {
+        apply(file, at: index, snapshot, sign: -1)
+    }
+
+    private mutating func apply(_ file: JobFile, at index: Int, _ snapshot: DownloadSnapshot?, sign: Int) {
+        totalBytes += Int64(sign) * file.size
+        if file.isCompleted {
+            completedBytes += Int64(sign) * file.size
+            return
+        }
+        pendingCount += sign
+        guard let snapshot else { return }
+        trackedCount += sign
+        receivedBytes += Int64(sign) * snapshot.receivedBytes
+        switch snapshot.state {
+        case .queued: queuedCount += sign
+        case .running:
+            if sign > 0 { runningFiles.insert(index) } else { runningFiles.remove(index) }
+        case .paused: pausedCount += sign
+        case .failed: failedCount += sign
+        case .completed: break
+        }
+    }
+}
+
+/// `evaluate` 得出的任务下一步。
+private enum Outcome: Equatable {
+    case finish
+    /// 让暂停的文件下载继续。
+    case reconcile
+    case fail(DownloadFailure)
+    /// 结果还没确定，或任务已暂停。
+    case wait
 }
 
 enum TransferCheckError: LocalizedError {

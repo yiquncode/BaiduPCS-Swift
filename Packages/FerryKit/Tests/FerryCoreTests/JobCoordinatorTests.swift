@@ -1,5 +1,5 @@
 import BaiduKit
-import DownloadKit
+@testable import DownloadKit
 import Foundation
 import Testing
 @testable import FerryCore
@@ -145,6 +145,57 @@ import Testing
         #expect(fixture.contents("b.bin") == fixture.netdisk.data(at: job.remoteDirectory + "/b.bin"))
     }
 
+    @Test func activityMatchesProgressOfCompletedAndRunningFiles() async throws {
+        let fixture = Fixture(share: ["small.bin": randomData(1_000), "big.bin": randomData(400_000)])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        fixture.server.setStalling(["/big.bin"])
+
+        let added = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        let activity = coordinator.activity(of: added.id)
+        try await waitUntil("small file completed and big file running") {
+            guard let job = coordinator.job(added.id), job.files.contains(where: \.isCompleted) else { return false }
+            return activity.isRunning && activity.progress.receivedBytes > 1_000 && activity.progress == coordinator.progress(of: job)
+        }
+        #expect(activity.progress.totalBytes == 401_000)
+
+        fixture.server.setStalling([])
+        try await coordinator.waitForPhase(.completed, of: added.id)
+        let finished = try #require(coordinator.job(added.id))
+        try await waitUntil("activity complete") {
+            !activity.isRunning && activity.progress == coordinator.progress(of: finished)
+        }
+        #expect(activity.progress.receivedBytes == 401_000)
+        #expect(activity.progress.bytesPerSecond == 0)
+    }
+
+    @Test func failsOnlyAfterOtherFilesStop() async throws {
+        let fixture = Fixture(share: ["bad.bin": randomData(1_000), "slow.bin": randomData(400_000)])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        fixture.server.setFailing(["/bad.bin"])
+        fixture.server.setStalling(["/slow.bin"])
+
+        let added = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        let activity = coordinator.activity(of: added.id)
+        try await waitUntil("bad file failed while slow file runs") {
+            guard let job = coordinator.job(added.id), job.files.count == 2 else { return false }
+            let states = job.files.map { coordinator.downloads[$0.id]?.state }
+            return states.contains { if case .failed = $0 { true } else { false } } && states.contains(DownloadState.running)
+        }
+        try await waitUntil("activity running") { activity.isRunning }
+        #expect(coordinator.job(added.id)?.phase == .downloading)
+
+        fixture.server.setStalling([])
+        try await coordinator.waitForPhase(.failed(.download), of: added.id)
+        let failed = try #require(coordinator.job(added.id))
+        #expect(failed.error == DownloadFailure.httpStatus(500, message: "").message)
+        #expect(failed.files.filter(\.isCompleted).map(\.relativePath) == ["slow.bin"])
+        try await waitUntil("activity stopped") {
+            !activity.isRunning && activity.progress == coordinator.progress(of: failed)
+        }
+    }
+
     @Test func removeCancelsDownloadsAndKeepsCompletedFiles() async throws {
         let fixture = Fixture(share: ["done.bin": Data(), "big.bin": randomData(400_000)])
         let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true, maxConcurrentFiles: 4))
@@ -219,6 +270,38 @@ import Testing
         #expect(fixture.contents("a.bin") == fixture.netdisk.data(at: job.remoteDirectory + "/a.bin"))
         let ranges = fixture.server.log.filter { $0 == job.remoteDirectory + "/a.bin" }
         #expect(ranges.count == 2)
+    }
+
+    @Test func restoreRecordsDownloadsCompletedBeforeSave() async throws {
+        let fixture = Fixture(share: ["small.bin": randomData(1_000), "big.bin": randomData(400_000)])
+        let first = fixture.makeCoordinator()
+        first.saveDelay = .seconds(60)
+        await first.start()
+        fixture.server.setStalling(["/big.bin"])
+        let job = first.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        try await waitUntil("small file completed") {
+            first.job(job.id)?.files.first { $0.relativePath == "small.bin" }?.isCompleted == true
+        }
+        // 完成状态还没写入任务列表，引擎仍保留它。保留这时的任务列表和小文件的完成记录，模拟应用在两步之间退出。
+        // 大文件的记录一直在更新，不复制它：退出后它的记录就是最终的。
+        let small = try #require(first.job(job.id)?.files.first { $0.relativePath == "small.bin" })
+        let smallState = StateStore(directory: fixture.stateDirectory).fileURL(for: small.id)
+        let savedJobs = try Data(contentsOf: fixture.store.fileURL)
+        let savedState = try Data(contentsOf: smallState)
+        await first.shutdown()
+        try await waitUntil("engine forgets small file") { !FileManager.default.fileExists(atPath: smallState.path) }
+        try savedState.write(to: smallState)
+        try savedJobs.write(to: fixture.store.fileURL)
+        #expect(try fixture.store.load().first?.files.contains(where: \.isCompleted) == false)
+
+        fixture.server.setStalling([])
+        let second = fixture.makeCoordinator()
+        await second.start()
+        let restored = try #require(second.job(job.id)?.files.first { $0.id == small.id })
+        #expect(restored.isCompleted)
+        try await second.waitForPhase(.completed, of: job.id)
+        #expect(fixture.server.requests(for: job.remoteDirectory + "/small.bin") == 1)
+        #expect(fixture.contents("big.bin") == fixture.netdisk.data(at: job.remoteDirectory + "/big.bin"))
     }
 
     @Test func restoresPausedJobAsPaused() async throws {

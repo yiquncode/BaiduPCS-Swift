@@ -309,6 +309,8 @@ final class Fixture {
                                          baseConfiguration: Self.configuration)
         coordinator.netdisk = netdisk
         coordinator.accountUK = Self.accountUK
+        // 每个测试的每个事件都检查增量维护的计数。
+        coordinator.tallyMismatchHandler = { Issue.record(Comment(rawValue: $0)) }
         return coordinator
     }
 
