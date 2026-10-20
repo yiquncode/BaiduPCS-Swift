@@ -365,9 +365,9 @@ final class AppModel {
         return link
     }
 
-    /// 默认显示网页登录。
-    func presentLogin(method: LoginMethod = .web) {
-        loginMethod = method
+    /// 先显示网页登录。
+    func presentLogin() {
+        loginMethod = .web
         sheet = .login
     }
 
