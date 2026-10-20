@@ -196,6 +196,13 @@ private struct NetworkSettingsView: View {
         }
     }
 
+    /// 选了 SOCKS5 但还什么都没填。这时不显示警告。
+    private var isBlank: Bool {
+        let proxy = model.settings.proxy
+        return proxy.mode == .socks5 && proxy.host.isEmpty && proxy.port == nil && proxy.username.isEmpty
+            && model.proxyPassword.isEmpty
+    }
+
     var body: some View {
         Form {
             Section {
@@ -213,7 +220,7 @@ private struct NetworkSettingsView: View {
                     SecureField("密码", text: $password, prompt: Text("可选"))
                         .focused($focusedField, equals: .password)
                 }
-                if let problem = model.proxyProblem {
+                if !isBlank, let problem = model.proxyProblem {
                     Label("\(problem)Ferry 暂时使用系统设置。", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 }
@@ -222,7 +229,7 @@ private struct NetworkSettingsView: View {
                         .foregroundStyle(.orange)
                 }
             } footer: {
-                Text("网盘请求和文件下载使用这个代理。网页登录使用系统设置。")
+                Text("网盘请求和文件下载使用这个代理。")
                     .foregroundStyle(.secondary)
             }
         }
