@@ -25,6 +25,25 @@ enum CredentialStore {
     }
 }
 
+/// 把 SOCKS5 代理的密码保存在 Keychain 中。代理的其他设置在 `FerrySettings` 中。
+enum ProxyPasswordStore {
+    private static let item = KeychainItem(account: "socks-proxy", name: "代理密码")
+
+    /// 没有保存密码时返回空字符串。
+    static func load() -> String {
+        item.load().flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
+
+    /// 密码为空时删除这一项。
+    static func save(_ password: String) throws {
+        if password.isEmpty {
+            item.delete()
+        } else {
+            try item.save(Data(password.utf8))
+        }
+    }
+}
+
 /// Keychain 中的一项通用密码。service 是应用的 bundle id。
 private struct KeychainItem {
     let account: String

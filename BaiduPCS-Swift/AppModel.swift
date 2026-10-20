@@ -2,6 +2,7 @@ import AppKit
 import BaiduKit
 import DownloadKit
 import FerryCore
+import Network
 import Observation
 import UserNotifications
 
@@ -18,6 +19,10 @@ final class AppModel {
     private(set) var downloadDirectory: URL
     /// 用户选择的下载目录无法访问时的说明。
     private(set) var downloadDirectoryProblem: String?
+    /// SOCKS5 代理的密码。存在 Keychain 中，不在 `settings` 中。
+    private(set) var proxyPassword: String
+    /// 代理密码没能存入 Keychain 时的说明。这次运行仍使用新密码。
+    private(set) var proxyPasswordProblem: String?
     let coordinator: JobCoordinator
 
     /// 主窗口的 sheet。同一时间只显示一个。
@@ -45,6 +50,13 @@ final class AppModel {
     @ObservationIgnored var openMainWindow: (() -> Void)?
 
     @ObservationIgnored private let source: BaiduDownloadSource
+    @ObservationIgnored private let engine: DownloadEngine
+    /// 当前登录的凭据。换代理时用它同步创建新客户端；后台校验用它判断期间是否换了账号，因为换代理也会换 `client`。
+    @ObservationIgnored private var credential: Credential?
+    /// 引擎和 `client` 的会话使用的代理。只在它变化时换会话。
+    @ObservationIgnored private var activeProxy: ActiveProxy?
+    /// 最近一次换引擎会话的 Task。下一次先等它完成，因为各个 Task 到达引擎的顺序不一定和创建顺序相同。
+    @ObservationIgnored private var sessionReplacement: Task<Void, Never>?
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored private var hasRequestedNotifications = false
     /// 设置中的下载目录。应用在选择期间一直持有它的访问权限；任务另外持有各自目录的访问权限。
@@ -63,18 +75,24 @@ final class AppModel {
     init() {
         let settings = UserDefaults.standard.data(forKey: Self.settingsKey)
             .flatMap { try? JSONDecoder().decode(FerrySettings.self, from: $0) } ?? FerrySettings()
+        let proxyPassword = ProxyPasswordStore.load()
+        let proxy = ActiveProxy(settings.proxy, password: proxyPassword)
         let source = BaiduDownloadSource()
         let engine = DownloadEngine(stateDirectory: FerryDirectories.downloadState, source: source,
-                                    configuration: settings.downloadConfiguration())
+                                    configuration: settings.downloadConfiguration(),
+                                    sessionConfiguration: Self.applying(proxy, to: DownloadEngine.defaultSessionConfiguration()))
         self.settings = settings
+        self.proxyPassword = proxyPassword
+        activeProxy = proxy
         self.source = source
+        self.engine = engine
         downloadDirectory = Self.defaultDownloadDirectory
         coordinator = JobCoordinator(engine: engine, store: JobStore(fileURL: FerryDirectories.jobsFile),
                                      settings: settings, downloadFolder: DownloadFolder(url: Self.defaultDownloadDirectory))
         coordinator.onJobCompleted = { [weak self] job in self?.notifyCompletion(of: job) }
         resolveDownloadDirectory()
         if let login = CredentialStore.load() {
-            apply(BaiduClient(credential: login.credential), account: login.account)
+            apply(makeClient(credential: login.credential), credential: login.credential, account: login.account)
         }
     }
 
@@ -100,17 +118,23 @@ final class AppModel {
 
     /// 校验凭据，通过后存入 Keychain 并开始使用。调用方取消时不保存。
     func logIn(credential: Credential) async throws {
-        let client = BaiduClient(credential: credential)
+        let proxy = activeProxy
+        var client = makeClient(credential: credential)
         let account = try await client.validate()
         // 用户在校验期间取消了登录。
         try Task.checkCancellation()
         try CredentialStore.save(StoredLogin(credential: credential, account: account))
-        apply(client, account: account)
+        // 校验期间代理变了。
+        if proxy != activeProxy {
+            client = makeClient(credential: credential)
+        }
+        apply(client, credential: credential, account: account)
     }
 
     func logOut() {
         CredentialStore.delete()
         client = nil
+        credential = nil
         account = nil
         isLoginExpired = false
         source.setClient(nil)
@@ -118,27 +142,37 @@ final class AppModel {
         coordinator.accountUK = nil
     }
 
-    private func apply(_ client: BaiduClient, account: Account) {
-        self.client = client
+    private func apply(_ client: BaiduClient, credential: Credential, account: Account) {
+        replaceClient(client)
+        self.credential = credential
         self.account = account
         isLoginExpired = false
+        coordinator.accountUK = account.uk
+    }
+
+    /// 只换客户端，不改变账号和登录状态。
+    private func replaceClient(_ client: BaiduClient) {
+        self.client = client
         source.setClient(client)
         coordinator.netdisk = client
-        coordinator.accountUK = account.uk
+    }
+
+    private func makeClient(credential: Credential) -> BaiduClient {
+        BaiduClient(credential: credential, configuration: Self.applying(activeProxy, to: BaiduClient.defaultConfiguration()))
     }
 
     /// 网络错误不算失效，只有百度明确说登录失效才提示。
     private func revalidate() async {
-        guard let client else { return }
+        guard let client, let credential else { return }
         do {
             let account = try await client.validate()
-            guard client === self.client else { return }
+            // 校验期间退出登录或换了账号。
+            guard credential == self.credential else { return }
             self.account = account
             coordinator.accountUK = account.uk
-            let credential = await client.credential
             try? CredentialStore.save(StoredLogin(credential: credential, account: account))
         } catch BaiduError.loginExpired {
-            if client === self.client { isLoginExpired = true }
+            if credential == self.credential { isLoginExpired = true }
         } catch {}
     }
 
@@ -150,6 +184,75 @@ final class AppModel {
         }
         let settings = settings
         Task { await coordinator.updateSettings(settings) }
+        updateProxy()
+    }
+
+    // MARK: - 代理
+
+    /// 实际生效的代理。使用系统设置或设置不完整时为 nil，这时会话使用系统的代理设置。
+    private struct ActiveProxy: Equatable {
+        var settings: ProxySettings
+        var password: String
+
+        init?(_ settings: ProxySettings, password: String) {
+            guard settings.mode == .socks5, settings.problem(password: password) == nil else { return nil }
+            self.settings = settings
+            self.password = password
+        }
+    }
+
+    /// 设置页显示的代理设置不完整的原因。
+    var proxyProblem: String? {
+        settings.proxy.problem(password: proxyPassword)
+    }
+
+    /// 网页登录的数据存储使用的代理。为空时使用系统设置。
+    var proxyConfigurations: [ProxyConfiguration] {
+        Self.proxyConfigurations(activeProxy)
+    }
+
+    /// 设置页一次提交代理设置和密码，所以两者都变化时只换一次会话。
+    func setProxy(_ proxy: ProxySettings, password: String) {
+        if password != proxyPassword {
+            proxyPassword = password
+            do {
+                try ProxyPasswordStore.save(password)
+                proxyPasswordProblem = nil
+            } catch {
+                proxyPasswordProblem = error.localizedDescription
+            }
+        }
+        if proxy != settings.proxy {
+            settings.proxy = proxy
+        } else {
+            updateProxy()
+        }
+    }
+
+    /// 生效的代理变化时，引擎换会话，进行中的下载从断点继续；已登录时用同一个凭据换客户端。
+    /// 已经发出的 API 请求在旧客户端上完成。
+    private func updateProxy() {
+        let proxy = ActiveProxy(settings.proxy, password: proxyPassword)
+        guard proxy != activeProxy else { return }
+        activeProxy = proxy
+        let configuration = Self.applying(proxy, to: DownloadEngine.defaultSessionConfiguration())
+        let previous = sessionReplacement
+        sessionReplacement = Task {
+            await previous?.value
+            await engine.replaceSession(configuration: configuration)
+        }
+        if let credential {
+            replaceClient(makeClient(credential: credential))
+        }
+    }
+
+    private static func proxyConfigurations(_ proxy: ActiveProxy?) -> [ProxyConfiguration] {
+        proxy.map { $0.settings.proxyConfigurations(password: $0.password) } ?? []
+    }
+
+    private static func applying(_ proxy: ActiveProxy?, to configuration: URLSessionConfiguration) -> URLSessionConfiguration {
+        configuration.proxyConfigurations = proxyConfigurations(proxy)
+        return configuration
     }
 
     /// 新任务默认的下载目录（设置中的下载目录）。任务记录它，以后每次启动用 bookmark 重新取得访问权限。

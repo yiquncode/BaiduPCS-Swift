@@ -3,7 +3,7 @@ import FerryCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 设置窗口：下载、网盘和账号三个标签页。
+/// 设置窗口：下载、网盘、网络和账号四个标签页。
 struct SettingsView: View {
     var body: some View {
         TabView {
@@ -12,6 +12,9 @@ struct SettingsView: View {
             }
             Tab("网盘", systemImage: "cloud") {
                 NetdiskSettingsView()
+            }
+            Tab("网络", systemImage: "network") {
+                NetworkSettingsView()
             }
             Tab("账号", systemImage: "person.crop.circle") {
                 AccountSettingsView()
@@ -147,6 +150,90 @@ private struct NetdiskSettingsView: View {
         if model.settings.transferFolder != folder {
             model.settings.transferFolder = folder
         }
+    }
+}
+
+/// 代理。
+private struct NetworkSettingsView: View {
+    @Environment(AppModel.self) private var model
+    /// 文本框的草稿。按回车、焦点离开全部文本框、切换标签页或关闭设置时一起提交，输入过程中不换代理，不打断下载。
+    @State private var host = ""
+    @State private var port = ""
+    @State private var username = ""
+    @State private var password = ""
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case host, port, username, password
+    }
+
+    /// 切换模式时同时提交草稿，所以只换一次代理。
+    private var mode: Binding<ProxySettings.Mode> {
+        Binding {
+            model.settings.proxy.mode
+        } set: { mode in
+            commit(mode: mode)
+        }
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("代理", selection: mode) {
+                    Text("使用系统设置").tag(ProxySettings.Mode.system)
+                    Text("SOCKS5").tag(ProxySettings.Mode.socks5)
+                }
+                if model.settings.proxy.mode == .socks5 {
+                    TextField("服务器", text: $host, prompt: Text("127.0.0.1"))
+                        .focused($focusedField, equals: .host)
+                    TextField("端口", text: $port, prompt: Text("1080"))
+                        .focused($focusedField, equals: .port)
+                    TextField("用户名", text: $username, prompt: Text("可选"))
+                        .focused($focusedField, equals: .username)
+                    SecureField("密码", text: $password, prompt: Text("可选"))
+                        .focused($focusedField, equals: .password)
+                }
+                if let problem = model.proxyProblem {
+                    Label("\(problem)Ferry 暂时使用系统设置。", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                if let problem = model.proxyPasswordProblem {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+            } footer: {
+                Text("网盘请求、文件下载和网页登录都使用这个代理。")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .autocorrectionDisabled()
+        .onSubmit { commit() }
+        // 在文本框之间切换时不提交：例如填了用户名还没填密码时，设置不完整，会先退回系统设置再换回代理。
+        .onChange(of: focusedField) { _, field in
+            if field == nil { commit() }
+        }
+        .onAppear {
+            let proxy = model.settings.proxy
+            host = proxy.host
+            port = proxy.port.map(String.init) ?? ""
+            username = proxy.username
+            password = model.proxyPassword
+        }
+        .onDisappear { commit() }
+    }
+
+    /// 端口不是数字时提交为未填写，由 `proxyProblem` 提示。
+    private func commit(mode: ProxySettings.Mode? = nil) {
+        var proxy = model.settings.proxy
+        if let mode { proxy.mode = mode }
+        proxy.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        proxy.port = Int(port.trimmingCharacters(in: .whitespacesAndNewlines))
+        proxy.username = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        model.setProxy(proxy, password: password)
+        host = proxy.host
+        port = proxy.port.map(String.init) ?? ""
+        username = proxy.username
     }
 }
 

@@ -10,14 +10,16 @@ public struct FerrySettings: Codable, Sendable, Hashable {
     public var cleanupAfterDownload: Bool
     public var maxConcurrentFiles: Int
     public var connectionsPerFile: Int
+    public var proxy: ProxySettings
 
     public init(downloadDirectoryBookmark: Data? = nil, transferFolder: String = "/Ferry", cleanupAfterDownload: Bool = false,
-                maxConcurrentFiles: Int = 1, connectionsPerFile: Int = 1) {
+                maxConcurrentFiles: Int = 1, connectionsPerFile: Int = 1, proxy: ProxySettings = ProxySettings()) {
         self.downloadDirectoryBookmark = downloadDirectoryBookmark
         self.transferFolder = transferFolder
         self.cleanupAfterDownload = cleanupAfterDownload
         self.maxConcurrentFiles = maxConcurrentFiles
         self.connectionsPerFile = connectionsPerFile
+        self.proxy = proxy
     }
 
     /// 缺少或无法解码的字段用默认值，一个字段出错不会丢掉其他设置（例如下载目录的 bookmark）。
@@ -32,6 +34,7 @@ public struct FerrySettings: Codable, Sendable, Hashable {
         cleanupAfterDownload = value(.cleanupAfterDownload) ?? defaults.cleanupAfterDownload
         maxConcurrentFiles = value(.maxConcurrentFiles) ?? defaults.maxConcurrentFiles
         connectionsPerFile = value(.connectionsPerFile) ?? defaults.connectionsPerFile
+        proxy = value(.proxy) ?? defaults.proxy
     }
 
     public static let concurrentFilesRange = 1...10

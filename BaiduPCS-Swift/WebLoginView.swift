@@ -1,4 +1,5 @@
 import BaiduKit
+import Network
 import OSLog
 import SwiftUI
 import WebKit
@@ -69,7 +70,7 @@ struct WebLoginView: View {
         .frame(minWidth: 720, idealWidth: 800, maxWidth: .infinity, minHeight: 600, idealHeight: 700, maxHeight: .infinity)
         .onAppear {
             guard session == nil else { return }
-            let session = WebLoginSession()
+            let session = WebLoginSession(proxyConfigurations: model.proxyConfigurations)
             session.onCredential = { logIn($0) }
             self.session = session
             session.start()
@@ -142,10 +143,13 @@ final class WebLoginSession: NSObject {
     /// 加载网盘主页后等这么久仍然没有网盘 STOKEN，就提示改用粘贴 Cookie。
     private static let diskMainTimeout: Duration = .seconds(10)
 
-    override init() {
+    /// `proxyConfigurations` 为空时使用系统的代理设置。之后修改代理不影响这个网页。
+    init(proxyConfigurations: [ProxyConfiguration]) {
         let configuration = WKWebViewConfiguration()
         // 每次登录都是新的环境。关闭 sheet 后网页的 Cookie 全部丢弃，凭据只存在 Keychain 中。
-        configuration.websiteDataStore = .nonPersistent()
+        let dataStore = WKWebsiteDataStore.nonPersistent()
+        dataStore.proxyConfigurations = proxyConfigurations
+        configuration.websiteDataStore = dataStore
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.customUserAgent = Self.chromeUserAgent
         cookieStore = configuration.websiteDataStore.httpCookieStore
