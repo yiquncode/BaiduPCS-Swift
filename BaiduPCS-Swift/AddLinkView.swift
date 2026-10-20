@@ -103,8 +103,11 @@ struct AddLinkView: View {
             } description: {
                 Text(errorMessage)
             } actions: {
-                Button("重试", action: openShare)
-                    .disabled(!canOpen)
+                // 未登录或链接无效时，重试不会成功。
+                if model.client != nil, ShareLink.parse(linkText) != nil {
+                    Button("重试", action: openShare)
+                        .disabled(!canOpen)
+                }
             }
         } else {
             ContentUnavailableView {
