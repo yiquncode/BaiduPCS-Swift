@@ -27,7 +27,8 @@ extension BaiduClient {
     }
 
     static func checkTransfer(_ json: JSON) throws {
-        let errno = json["errno"].int ?? 0
+        // 没有 errno 时无法确认转存成功，例如返回的是登录页或网关错误。
+        guard let errno = json["errno"].int else { throw BaiduError.invalidResponse }
         switch errno {
         case 0:
             return
