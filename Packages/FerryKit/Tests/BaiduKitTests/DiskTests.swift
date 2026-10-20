@@ -161,6 +161,7 @@ extension StubbedNetworkTests {
         @Test(arguments: [
             #"{"error_code":31626,"error_msg":"user is not authorized"}"#,
             #"{"error_code":31326,"error_msg":"user is not authorized, hitcode:122"}"#,
+            #"{"error_code":31044,"error_msg":"user is not authorized"}"#,
             #"{"urls":[{"url":"http://x.example/f","encrypt":1}]}"#,
         ])
         func downloadLinkFallsBackToPCSDownload(_ response: String) async throws {
@@ -174,15 +175,22 @@ extension StubbedNetworkTests {
             #expect(components.queryItems?.first { $0.name == "method" }?.value == "download")
             #expect(components.queryItems?.first { $0.name == "app_id" }?.value == "266719")
             #expect(components.queryItems?.first { $0.name == "path" }?.value == "/Ferry/a b.zip")
-            #expect(link.headers["User-Agent"] == nil)
+            #expect(link.headers["User-Agent"] == UserAgent.netdisk)
             #expect(link.headers["Cookie"]?.contains("BDUSS=test_bduss") == true)
         }
 
-        @Test func downloadLinkDoesNotFallBackForMissingFile() async {
+        @Test(arguments: [
+            (StubResponse.json(#"{"error_code":31066}"#, status: 404), BaiduError.fileNotFound),
+            (.json(#"{"error_code":31045}"#, status: 403), .loginExpired),
+            (.json(#"{"error_code":31023,"error_msg":"param error"}"#, status: 400), .server(code: 31023, message: "param error")),
+            (StubResponse(status: 502, body: Data("Bad Gateway".utf8)), .httpStatus(502)),
+            (.html("<html>login</html>"), .invalidResponse),
+        ])
+        func downloadLinkDoesNotFallBackForOtherErrors(_ response: StubResponse, _ error: BaiduError) async {
             let client = Fixture.client { request in
-                request.path == "/c/s/login" ? .json(#"{"error_code":"1"}"#) : .json(#"{"error_code":31066}"#, status: 404)
+                request.path == "/c/s/login" ? .json(#"{"error_code":"1"}"#) : response
             }
-            await #expect(throws: BaiduError.fileNotFound) { try await client.downloadLink(for: "/gone") }
+            await #expect(throws: error) { try await client.downloadLink(for: "/gone") }
         }
     }
 }

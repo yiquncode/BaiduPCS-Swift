@@ -29,12 +29,14 @@ enum Endpoint: Sendable {
 
     var userAgent: String? {
         switch self {
-        case .sharePage, .fileList, .locateDownload, .downloadLink: UserAgent.netdisk
+        case .sharePage, .fileList: UserAgent.netdisk
+        // 参考实现对 PCS download 地址不发送 UA。URLSession 不能发送空 UA，所以下载相关的接口统一用 NetdiskUA。
+        case .locateDownload, .downloadLink, .pcsDownload: UserAgent.netdisk
         case .shareVerify, .shareList: UserAgent.chromeMac63
         case .shareTransfer: UserAgent.chromeWin76
         case .shareWXList: UserAgent.wxList
         case .tiebaLogin: UserAgent.tieba
-        case .templateVariable, .userInfo, .pcsFile, .pcsDownload: UserAgent.unspecified
+        case .templateVariable, .userInfo, .pcsFile: UserAgent.unspecified
         }
     }
 }

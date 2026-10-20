@@ -76,16 +76,14 @@ extension BaiduClient {
 
     // MARK: - 下载链接
 
-    /// 取文件的下载地址。先用 `locatedownload`，失败时退回 PCS `download` 地址。
+    /// 取文件的下载地址。先用 `locatedownload`。它报告未授权（31044、31326、31626）或没有可用的未加密地址时，
+    /// 退回 PCS `download` 地址（参考实现的帮助对 `user is not authorized` 建议这样做）。其他错误原样抛出。
     /// `preference` 是优先选用的 dlink 序号。下载后大小不符时，下次可以加 1。
     public func downloadLink(for path: String, preference: Int = 0) async throws -> DownloadLink {
         do {
             return try await locateDownload(path, preference: preference)
-        } catch let error as BaiduError {
-            switch error {
-            case .fileNotFound, .loginExpired, .network: throw error
-            default: return pcsDownloadLink(path)
-            }
+        } catch BaiduError.unauthorized, BaiduError.noDownloadLink {
+            return pcsDownloadLink(path)
         }
     }
 
