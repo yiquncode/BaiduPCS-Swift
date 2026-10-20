@@ -61,7 +61,7 @@ private struct JobRow: View {
         } else {
             DisclosureGroup(isExpanded: $isExpanded) {
                 ForEach(job.files) { file in
-                    FileRow(file: file, snapshot: model.coordinator.downloads[file.id])
+                    FileRow(file: file, activity: model.coordinator.activity(ofFile: file.id))
                 }
             } label: {
                 summary
@@ -70,7 +70,8 @@ private struct JobRow: View {
     }
 
     private var summary: some View {
-        let progress = model.coordinator.progress(of: job)
+        let activity = model.coordinator.activity(of: job.id)
+        let progress = activity.progress
         return HStack(spacing: 12) {
             Image(systemName: job.entries.count == 1 && !job.entries[0].isDirectory
                   ? FileIcon.systemName(for: job.title, isDirectory: false) : "folder")
@@ -89,7 +90,7 @@ private struct JobRow: View {
                         .tint(job.phase == .failed(.download) ? .red : nil)
                 }
                 HStack(spacing: 6) {
-                    Text(job.statusText(downloads: model.coordinator.downloads))
+                    Text(job.statusText(isRunning: activity.isRunning))
                     if !job.files.isEmpty {
                         Text(job.phase == .downloading && !job.isPaused ? progress.summary : progress.sizeSummary)
                     }
@@ -153,13 +154,14 @@ private struct JobActions: View {
     }
 }
 
-/// 任务中的一个文件下载。
+/// 任务中的一个文件下载。只观察这个文件的状态。
 private struct FileRow: View {
     let file: JobFile
-    let snapshot: DownloadSnapshot?
+    let activity: FileActivity
 
     var body: some View {
-        HStack(spacing: 8) {
+        let snapshot = activity.snapshot
+        return HStack(spacing: 8) {
             Image(systemName: FileIcon.systemName(for: file.name, isDirectory: false))
                 .foregroundStyle(.secondary)
                 .frame(width: 20)

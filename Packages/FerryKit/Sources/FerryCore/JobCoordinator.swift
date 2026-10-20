@@ -28,8 +28,9 @@ public struct JobProgress: Sendable, Hashable {
 public final class JobCoordinator {
     /// 新任务在前。
     public private(set) var jobs: [Job] = []
-    /// 引擎中文件下载的最新状态，键是文件下载 id。
-    public private(set) var downloads: [String: DownloadSnapshot] = [:]
+    /// 引擎中文件下载的最新状态，键是文件下载 id。界面不直接观察它（进度每 0.5 秒变化一次），
+    /// 而是观察 `activity(of:)` 和 `activity(ofFile:)`。
+    @ObservationIgnored public private(set) var downloads: [String: DownloadSnapshot] = [:]
     public private(set) var settings: FerrySettings
     /// 新任务的下载目录。已有任务使用创建时记录的目录。
     public var downloadFolder: DownloadFolder
@@ -65,6 +66,21 @@ public final class JobCoordinator {
     @ObservationIgnored private var hasLoaded = false
     /// 任务列表无法读取、也无法备份时为 false：这次启动不写入，保留原文件。
     @ObservationIgnored private var canSave = true
+    /// 进度类变化（文件下载完成）延迟这么久再合并保存。阶段变化立即保存。
+    @ObservationIgnored var saveDelay: Duration = .seconds(1)
+    @ObservationIgnored private var pendingSave: Task<Void, Never>?
+    /// 完成状态写入任务列表后，要从引擎取消的文件下载。
+    @ObservationIgnored private var cancelAfterSave: [String] = []
+    /// 测试用：写入任务列表的次数。
+    @ObservationIgnored private(set) var saveCount = 0
+    /// 文件下载 id → (任务 id, 文件下标)。任务列表或文件列表变化后重建。
+    @ObservationIgnored private var fileLocations: [String: (job: UUID, file: Int)] = [:]
+    @ObservationIgnored private var jobIndices: [UUID: Int] = [:]
+    @ObservationIgnored private var isIndexStale = true
+    @ObservationIgnored private var jobActivities: [UUID: JobActivity] = [:]
+    @ObservationIgnored private var fileActivities: [String: FileActivity] = [:]
+    @ObservationIgnored private var changedJobs: Set<UUID> = []
+    @ObservationIgnored private var isActivityUpdateScheduled = false
 
     /// - Parameter baseConfiguration: 设置不覆盖的下载参数（分片大小、重试等）。
     public init(engine: DownloadEngine, store: JobStore, settings: FerrySettings, downloadFolder: DownloadFolder,
@@ -117,6 +133,7 @@ public final class JobCoordinator {
         }
         // 启动完成前添加的任务排在前面。
         jobs += loaded
+        invalidateIndex()
         hasLoaded = true
 
         await engine.updateConfiguration(settings.downloadConfiguration(base: baseConfiguration))
@@ -157,7 +174,7 @@ public final class JobCoordinator {
                 }
                 finished.append(snapshot.id)
             } else {
-                downloads[snapshot.id] = snapshot
+                setSnapshot(snapshot.id, snapshot)
             }
         }
         save()
@@ -203,6 +220,7 @@ public final class JobCoordinator {
         job.downloadFolder = downloadFolder
         job.accountUK = accountUK
         jobs.insert(job, at: 0)
+        invalidateIndex()
         save()
         startTransfer(job.id, session: session, removingExisting: false)
         return job
@@ -235,6 +253,8 @@ public final class JobCoordinator {
                 $0.error = nil
                 $0.files = []
             }
+            invalidateIndex()
+            markChanged(id)
             save()
             // 上次转存可能已经转存了一部分，留下来会产生同名冲突。
             startTransfer(id, session: nil, removingExisting: true)
@@ -269,6 +289,9 @@ public final class JobCoordinator {
             await engine.cancel(id: file.id)
         }
         jobs.removeAll { $0.id == id }
+        invalidateIndex()
+        jobActivities[id] = nil
+        for file in job.files { fileActivities[file.id] = nil }
         save()
         closeFolder(of: id)
         if settings.cleanupAfterDownload, !job.isCleanedUp, !belongsToOtherAccount(job), let netdisk {
@@ -342,6 +365,8 @@ public final class JobCoordinator {
                 $0.isCleanedUp = false
                 $0.warning = warning
             }
+            invalidateIndex()
+            markChanged(id)
             save()
             await serially(id) { await self.continueDownloads(id, resumingFailed: false) }
             evaluate(id)
@@ -434,7 +459,7 @@ public final class JobCoordinator {
     private func refreshSnapshot(_ fileID: String) async {
         guard let snapshot = await engine.snapshot(id: fileID) else { return }
         if case .completed = snapshot.state { return }
-        downloads[fileID] = snapshot
+        setSnapshot(fileID, snapshot)
     }
 
     /// 暂停任务的文件下载。任务在此期间被继续时停止。
@@ -469,23 +494,30 @@ public final class JobCoordinator {
         switch event {
         case .progress(let snapshot):
             guard locate(snapshot.id) != nil else { return }
-            downloads[snapshot.id] = snapshot
+            setSnapshot(snapshot.id, snapshot)
         case .stateChanged(let snapshot):
             guard let (jobIndex, fileIndex) = locate(snapshot.id) else { return }
             let jobID = jobs[jobIndex].id
             if case .completed(let url) = snapshot.state {
                 if jobs[jobIndex].files[fileIndex].localURL == nil {
                     jobs[jobIndex].files[fileIndex].localURL = url
-                    save()
                 }
                 // 完成状态写入任务列表后，引擎才删除这个文件下载的状态。
-                let fileID = snapshot.id
-                Task { await engine.cancel(id: fileID) }
+                cancelAfterSave.append(snapshot.id)
+                scheduleSave()
             }
-            downloads[snapshot.id] = snapshot
+            setSnapshot(snapshot.id, snapshot)
             evaluate(jobID)
         case .removed(let id):
-            downloads[id] = nil
+            setSnapshot(id, nil)
+        }
+    }
+
+    private func setSnapshot(_ fileID: String, _ snapshot: DownloadSnapshot?) {
+        downloads[fileID] = snapshot
+        fileActivities[fileID]?.snapshot = snapshot
+        if let location = locateIndexed(fileID) {
+            markChanged(location.job)
         }
     }
 
@@ -610,7 +642,8 @@ public final class JobCoordinator {
     }
 
     private func job(_ id: Job.ID) -> Job? {
-        jobs.first { $0.id == id }
+        if isIndexStale { rebuildIndex() }
+        return jobIndices[id].map { jobs[$0] }
     }
 
     /// 存在且没有正在移除的任务。
@@ -619,26 +652,112 @@ public final class JobCoordinator {
     }
 
     private func update(_ id: Job.ID, _ body: (inout Job) -> Void) {
-        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
+        if isIndexStale { rebuildIndex() }
+        guard let index = jobIndices[id] else { return }
         body(&jobs[index])
+        markChanged(id)
     }
 
     private func locate(_ fileID: String) -> (Int, Int)? {
-        for (jobIndex, job) in jobs.enumerated() {
-            if let fileIndex = job.files.firstIndex(where: { $0.id == fileID }) {
-                return (jobIndex, fileIndex)
-            }
-        }
-        return nil
+        guard let location = locateIndexed(fileID), let jobIndex = jobIndices[location.job] else { return nil }
+        return (jobIndex, location.file)
     }
 
+    private func locateIndexed(_ fileID: String) -> (job: UUID, file: Int)? {
+        if isIndexStale { rebuildIndex() }
+        return fileLocations[fileID]
+    }
+
+    private func invalidateIndex() {
+        isIndexStale = true
+    }
+
+    private func rebuildIndex() {
+        fileLocations = [:]
+        jobIndices = [:]
+        for (jobIndex, job) in jobs.enumerated() {
+            jobIndices[job.id] = jobIndex
+            for (fileIndex, file) in job.files.enumerated() {
+                fileLocations[file.id] = (job.id, fileIndex)
+            }
+        }
+        isIndexStale = false
+    }
+
+    /// 立即写入任务列表，然后从引擎取消已记入任务的完成的文件下载。
     private func save() {
+        pendingSave?.cancel()
+        pendingSave = nil
         guard hasLoaded, canSave else { return }
         do {
             try store.save(jobs)
+            saveCount += 1
         } catch {
             logger.error("cannot save jobs: \(error.localizedDescription)")
+            return
         }
+        let finished = cancelAfterSave
+        cancelAfterSave = []
+        if !finished.isEmpty {
+            Task {
+                for id in finished { await engine.cancel(id: id) }
+            }
+        }
+    }
+
+    /// 合并短时间内的多次变化，`saveDelay` 后写入一次。
+    private func scheduleSave() {
+        guard pendingSave == nil else { return }
+        pendingSave = Task { [saveDelay] in
+            try? await Task.sleep(for: saveDelay)
+            guard !Task.isCancelled else { return }
+            save()
+        }
+    }
+
+    // MARK: - 界面观察的进度
+
+    /// 任务的汇总进度。每个任务一个对象，进度变化只让显示这个任务的视图刷新。
+    public func activity(of id: Job.ID) -> JobActivity {
+        if let activity = jobActivities[id] { return activity }
+        let activity = JobActivity()
+        if let job = job(id) { refresh(activity, for: job) }
+        jobActivities[id] = activity
+        return activity
+    }
+
+    /// 文件下载的状态。只有展开的文件行观察它。
+    public func activity(ofFile id: String) -> FileActivity {
+        if let activity = fileActivities[id] { return activity }
+        let activity = FileActivity(snapshot: downloads[id])
+        fileActivities[id] = activity
+        return activity
+    }
+
+    /// 同一轮事件（引擎每次发出全部进行中文件的进度）只重新计算一次。
+    private func markChanged(_ id: Job.ID) {
+        guard jobActivities[id] != nil else { return }
+        changedJobs.insert(id)
+        guard !isActivityUpdateScheduled else { return }
+        isActivityUpdateScheduled = true
+        Task { updateActivities() }
+    }
+
+    private func updateActivities() {
+        isActivityUpdateScheduled = false
+        let changed = changedJobs
+        changedJobs = []
+        for id in changed {
+            guard let activity = jobActivities[id], let job = job(id) else { continue }
+            refresh(activity, for: job)
+        }
+    }
+
+    private func refresh(_ activity: JobActivity, for job: Job) {
+        let progress = progress(of: job)
+        if activity.progress != progress { activity.progress = progress }
+        let isRunning = job.files.contains { !$0.isCompleted && downloads[$0.id]?.state == .running }
+        if activity.isRunning != isRunning { activity.isRunning = isRunning }
     }
 
     static func message(for error: any Error) -> String {

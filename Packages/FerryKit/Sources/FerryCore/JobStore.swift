@@ -16,9 +16,7 @@ public struct JobStore: Sendable {
 
     public func save(_ jobs: [Job]) throws {
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(jobs).write(to: fileURL, options: .atomic)
+        try JSONEncoder().encode(jobs).write(to: fileURL, options: .atomic)
     }
 
     /// 把无法读取的任务列表改名为 `jobs.json.corrupt-<时间戳>`，返回新位置。改名失败时返回 nil。

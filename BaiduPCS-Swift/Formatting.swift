@@ -27,15 +27,14 @@ extension JobProgress {
 extension Job {
     var isUnfinished: Bool { phase != .completed }
 
-    func statusText(downloads: [String: DownloadSnapshot]) -> String {
+    /// `isRunning`：有文件正在下载（见 `JobActivity`）。
+    func statusText(isRunning: Bool) -> String {
         switch phase {
         case .transferring:
             return "正在转存…"
         case .downloading:
             if isPaused { return "已暂停" }
-            let pending = files.filter { !$0.isCompleted }
-            if pending.isEmpty { return "正在清理网盘中的转存文件…" }
-            let isRunning = pending.contains { downloads[$0.id]?.state == .running }
+            if files.allSatisfy(\.isCompleted) { return "正在清理网盘中的转存文件…" }
             return isRunning ? "正在下载" : "等待下载"
         case .completed:
             return "已完成"

@@ -129,7 +129,7 @@ final class FakeNetdisk: Netdisk {
 final class FileServer: Sendable {
     let host = "\(UUID().uuidString.lowercased()).test"
     private let netdisk: FakeNetdisk
-    private let state = Mutex<(log: [String], stalled: Bool, failing: Set<String>)>(([], false, []))
+    private let state = Mutex<(log: [String], stalled: Bool, failing: Set<String>, stalling: Set<String>)>(([], false, [], []))
 
     init(netdisk: FakeNetdisk) {
         self.netdisk = netdisk
@@ -140,6 +140,8 @@ final class FileServer: Sendable {
     func requests(for path: String) -> Int { log.count { $0 == path } }
     /// 停住所有响应，直到设为 false 或请求被取消。
     func setStalled(_ stalled: Bool) { state.withLock { $0.stalled = stalled } }
+    /// 只停住以这些后缀结尾的路径。
+    func setStalling(_ suffixes: Set<String>) { state.withLock { $0.stalling = suffixes } }
     /// 以这些后缀结尾的路径返回 500。
     func setFailing(_ suffixes: Set<String>) { state.withLock { $0.failing = suffixes } }
 
@@ -187,7 +189,7 @@ final class FileServer: Sendable {
         // 先发一部分，停住时留下可以续传的进度。
         let half = body.count / 2
         if half > 0 { client.urlProtocol(connection, didLoad: body.prefix(half)) }
-        while state.withLock({ $0.stalled }) {
+        while state.withLock({ $0.stalled || $0.stalling.contains { path.hasSuffix($0) } }) {
             if connection.isStopped { return }
             Thread.sleep(forTimeInterval: 0.002)
         }
