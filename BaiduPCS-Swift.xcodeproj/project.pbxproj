@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		18F1CB333086E8A000A59465 /* BaiduKit in Frameworks */ = {isa = PBXBuildFile; productRef = 18F1CB313086E8A000A59465 /* BaiduKit */; };
+		18F1CB343086E8A000A59465 /* DownloadKit in Frameworks */ = {isa = PBXBuildFile; productRef = 18F1CB323086E8A000A59465 /* DownloadKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		18F1CB143086E87B00A59465 /* BaiduPCS-Swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "BaiduPCS-Swift.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +28,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				18F1CB333086E8A000A59465 /* BaiduKit in Frameworks */,
+				18F1CB343086E8A000A59465 /* DownloadKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +72,8 @@
 			);
 			name = "BaiduPCS-Swift";
 			packageProductDependencies = (
+				18F1CB313086E8A000A59465 /* BaiduKit */,
+				18F1CB323086E8A000A59465 /* DownloadKit */,
 			);
 			productName = "BaiduPCS-Swift";
 			productReference = 18F1CB143086E87B00A59465 /* BaiduPCS-Swift.app */;
@@ -94,6 +103,9 @@
 			);
 			mainGroup = 18F1CB0B3086E87B00A59465;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				18F1CB303086E8A000A59465 /* XCLocalSwiftPackageReference "Packages/FerryKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 18F1CB153086E87B00A59465 /* Products */;
 			projectDirPath = "";
@@ -248,14 +260,18 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "BaiduPCS-Swift/BaiduPCS-Swift.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = YES;
+				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
+				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Ferry;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -279,14 +295,18 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "BaiduPCS-Swift/BaiduPCS-Swift.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = YES;
+				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
+				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Ferry;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -327,6 +347,24 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		18F1CB303086E8A000A59465 /* XCLocalSwiftPackageReference "Packages/FerryKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/FerryKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		18F1CB313086E8A000A59465 /* BaiduKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BaiduKit;
+		};
+		18F1CB323086E8A000A59465 /* DownloadKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DownloadKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 18F1CB0C3086E87B00A59465 /* Project object */;
 }

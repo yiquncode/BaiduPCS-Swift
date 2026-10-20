@@ -1,0 +1,5 @@
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+.claude/settings.local.json
