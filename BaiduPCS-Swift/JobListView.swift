@@ -10,7 +10,7 @@ struct JobListView: View {
     let searchText: String
     @Binding var selection: Set<Job.ID>
     /// 请求移除任务。调用方决定是否先确认。
-    let onRemove: ([Job]) -> Void
+    let onRemove: ([Job], JobRemoval) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -40,7 +40,7 @@ struct JobListView: View {
                 model.perform(.reveal, on: model.jobs(in: jobs.filter { ids.contains($0.id) }, allowing: .reveal))
             }
             .onDeleteCommand {
-                onRemove(jobs.filter { selection.contains($0.id) })
+                onRemove(jobs.filter { selection.contains($0.id) }, .keepingFiles)
             }
         }
     }
@@ -88,7 +88,7 @@ struct JobActionsMenu: View {
     /// 为 true 时显示不可用的操作（菜单栏菜单）。
     var showsUnavailable = false
     /// 请求移除任务。调用方决定是否先确认。
-    let onRemove: ([Job]) -> Void
+    let onRemove: ([Job], JobRemoval) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -106,11 +106,20 @@ struct JobActionsMenu: View {
         if showsUnavailable || !jobs.isEmpty {
             Divider()
             Button(role: .destructive) {
-                onRemove(jobs)
+                onRemove(jobs, .keepingFiles)
             } label: {
-                Label("移除…", systemImage: "xmark")
+                Label("移除", systemImage: "xmark")
             }
             .disabled(!jobs.contains { model.canOperate(on: $0) })
+            let canTrash = model.canTrashFiles(of: jobs)
+            if showsUnavailable || canTrash {
+                Button(role: .destructive) {
+                    onRemove(jobs, .trashingFiles)
+                } label: {
+                    Label("移除并删除文件…", systemImage: "trash")
+                }
+                .disabled(!canTrash)
+            }
         }
     }
 }
@@ -119,11 +128,19 @@ struct JobActionsMenu: View {
 struct JobSelection {
     let jobs: [Job]
     /// 请求移除任务。主窗口决定是否先确认。
-    let onRemove: ([Job]) -> Void
+    let onRemove: ([Job], JobRemoval) -> Void
 }
 
 extension FocusedValues {
     @Entry var jobSelection: JobSelection?
+}
+
+/// 移除任务时怎样处理已下载的文件。没完成的文件下载总是取消，并删除已下载的部分。
+enum JobRemoval {
+    /// 已下载的文件留在本地。
+    case keepingFiles
+    /// 已下载的文件移到废纸篓。
+    case trashingFiles
 }
 
 /// 对一个任务的操作。

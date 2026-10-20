@@ -1,3 +1,4 @@
+import AppKit
 import FerryCore
 import SwiftUI
 
@@ -8,8 +9,8 @@ struct MainView: View {
     @State private var selection: Set<Job.ID> = []
     @SceneStorage("isInspectorPresented") private var isInspectorPresented = true
     @State private var searchText = ""
-    /// 等待确认移除的任务。
-    @State private var pendingRemoval: [Job] = []
+    /// 等待确认的移除。
+    @State private var pendingRemoval: PendingRemoval?
 
     var body: some View {
         let current = category ?? .all
@@ -57,44 +58,73 @@ struct MainView: View {
         .frame(minWidth: 640, minHeight: 400)
         .focusedSceneValue(\.jobSelection, JobSelection(jobs: selectedJobs, onRemove: requestRemoval))
         .confirmationDialog(
-            removalTitle,
-            isPresented: Binding(get: { !pendingRemoval.isEmpty }, set: { if !$0 { pendingRemoval = [] } }),
+            pendingRemoval?.title ?? "",
+            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
             presenting: pendingRemoval
-        ) { jobs in
-            Button("移除", role: .destructive) { remove(jobs) }
-        } message: { jobs in
-            Text(removalMessage(count: jobs.count))
+        ) { pending in
+            Button(pending.removal == .trashingFiles ? "移到废纸篓" : "移除", role: .destructive) {
+                remove(pending.jobs, pending.removal)
+            }
+        } message: { pending in
+            Text(pending.message(cleansUp: model.settings.cleanupAfterDownload))
+        }
+        .alert(
+            "有些文件没有移到废纸篓",
+            isPresented: Binding(get: { !model.untrashedItems.isEmpty }, set: { if !$0 { model.untrashedItems = [] } }),
+            presenting: model.untrashedItems
+        ) { items in
+            Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting(items) }
+            Button("好", role: .cancel) {}
+        } message: { items in
+            Text("\(items.count) 项仍在原来的位置，可以在 Finder 中手动删除。")
         }
     }
 
-    private var removalTitle: String {
-        pendingRemoval.count == 1 ? "移除“\(pendingRemoval[0].title)”？" : "移除 \(pendingRemoval.count) 个任务？"
-    }
-
-    private func removalMessage(count: Int) -> String {
-        var message = "未完成的下载会取消，并删除已下载的部分。已完成的文件保留在本地。"
-        if model.settings.cleanupAfterDownload {
-            message += count == 1 ? "网盘中这个任务的转存文件也会删除。" : "网盘中这些任务的转存文件也会删除。"
-        }
-        return message
-    }
-
-    /// 有未完成的任务时先确认。
-    private func requestRemoval(of jobs: [Job]) {
+    /// 移到废纸篓总是先确认；只移除任务时，有未完成的任务才先确认。
+    private func requestRemoval(of jobs: [Job], _ removal: JobRemoval) {
         let jobs = jobs.filter { !model.coordinator.removingJobs.contains($0.id) }
         guard model.coordinator.isStarted, !jobs.isEmpty else { return }
-        if jobs.contains(where: \.isUnfinished) {
-            pendingRemoval = jobs
+        if removal == .trashingFiles || jobs.contains(where: \.isUnfinished) {
+            pendingRemoval = PendingRemoval(jobs: jobs, removal: removal)
         } else {
-            remove(jobs)
+            remove(jobs, removal)
         }
     }
 
-    private func remove(_ jobs: [Job]) {
+    private func remove(_ jobs: [Job], _ removal: JobRemoval) {
         for job in jobs {
             selection.remove(job.id)
-            model.remove(job)
+            model.remove(job, trashingFiles: removal == .trashingFiles)
         }
+    }
+}
+
+/// 等待确认的移除：要移除的任务和怎样处理已下载的文件。
+private struct PendingRemoval {
+    let jobs: [Job]
+    let removal: JobRemoval
+
+    var title: String {
+        let subject = jobs.count == 1 ? "移除“\(jobs[0].title)”" : "移除 \(jobs.count) 个任务"
+        return removal == .trashingFiles ? subject + "并删除文件？" : subject + "？"
+    }
+
+    /// `cleansUp`：设置中的清理开关。
+    func message(cleansUp: Bool) -> String {
+        var message: String
+        switch removal {
+        case .keepingFiles:
+            message = "未完成的下载会取消，并删除已下载的部分。已完成的文件保留在本地。"
+        case .trashingFiles:
+            message = "已下载的文件会移到废纸篓。"
+            if jobs.contains(where: \.isUnfinished) {
+                message += "未完成的下载会取消，并删除已下载的部分。"
+            }
+        }
+        if cleansUp {
+            message += jobs.count == 1 ? "网盘中这个任务的转存文件也会删除。" : "网盘中这些任务的转存文件也会删除。"
+        }
+        return message
     }
 }
 

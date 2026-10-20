@@ -52,6 +52,8 @@ public final class JobCoordinator {
     @ObservationIgnored private let store: JobStore
     @ObservationIgnored private let baseConfiguration: DownloadConfiguration
     @ObservationIgnored private let folderAccess: any DownloadFolderAccess
+    /// 把一个文件或目录移到废纸篓。测试用它代替系统的废纸篓。
+    @ObservationIgnored private let trashItem: @Sendable (URL) throws -> Void
     /// 已取得访问权限的任务下载目录。任务完成或移除后交回。
     @ObservationIgnored private var openedFolders: [UUID: OpenedFolder] = [:]
     /// 每个任务的转存或收尾任务。
@@ -85,12 +87,14 @@ public final class JobCoordinator {
     /// - Parameter baseConfiguration: 设置不覆盖的下载参数（分片大小、重试等）。
     public init(engine: DownloadEngine, store: JobStore, settings: FerrySettings, downloadFolder: DownloadFolder,
                 folderAccess: any DownloadFolderAccess = SecurityScopedFolderAccess(),
+                trashItem: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) },
                 baseConfiguration: DownloadConfiguration = DownloadConfiguration()) {
         self.engine = engine
         self.store = store
         self.settings = settings
         self.downloadFolder = downloadFolder
         self.folderAccess = folderAccess
+        self.trashItem = trashItem
         self.baseConfiguration = baseConfiguration
         let events = engine.events()
         Task { [weak self] in
@@ -271,10 +275,13 @@ public final class JobCoordinator {
         }
     }
 
-    /// 移除任务，取消没有完成的文件下载。已下载的文件留在本地。
-    public func remove(_ id: Job.ID) async {
+    /// 移除任务，取消没有完成的文件下载。`trashingFiles` 为 true 时把已下载的文件移到废纸篓（见 `JobFileTrash`），
+    /// 否则它们留在本地。
+    /// - Returns: 没能移到废纸篓的文件或目录。
+    @discardableResult
+    public func remove(_ id: Job.ID, trashingFiles: Bool = false) async -> [URL] {
         await waitUntilStarted()
-        guard job(id) != nil, !removingJobs.contains(id) else { return }
+        guard job(id) != nil, !removingJobs.contains(id) else { return [] }
         removingJobs.insert(id)
         defer { removingJobs.remove(id) }
         if let task = tasks.removeValue(forKey: id) {
@@ -285,9 +292,16 @@ public final class JobCoordinator {
         await serially(id) {}
         lanes[id] = nil
         // 转存可能在结束前写入了文件列表，所以重新读取任务。
-        guard let job = job(id) else { return }
+        guard let job = job(id) else { return [] }
         for file in job.files {
             await engine.cancel(id: file.id)
+        }
+        var failed: [URL] = []
+        if trashingFiles {
+            // 已完成的任务已经交回了下载目录的访问权限，重新取得。取不到时移动失败，如实返回。
+            _ = try? folderURL(for: id)
+            let trashItem = trashItem
+            failed = await Task.detached { JobFileTrash.trash(job, using: trashItem) }.value
         }
         jobs.removeAll { $0.id == id }
         invalidateIndex()
@@ -302,6 +316,7 @@ public final class JobCoordinator {
                 logger.error("cannot delete \(job.remoteDirectory): \(error.localizedDescription)")
             }
         }
+        return failed
     }
 
     public func progress(of job: Job) -> JobProgress {

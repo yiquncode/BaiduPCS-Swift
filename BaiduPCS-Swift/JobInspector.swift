@@ -8,18 +8,18 @@ import SwiftUI
 struct JobInspector: View {
     let jobs: [Job]
     /// 请求移除任务。调用方决定是否先确认。
-    let onRemove: ([Job]) -> Void
+    let onRemove: ([Job], JobRemoval) -> Void
 
     var body: some View {
         switch jobs.count {
         case 0:
             ContentUnavailableView("未选择任务", systemImage: "sidebar.trailing")
         case 1:
-            JobDetail(job: jobs[0], onRemove: { onRemove(jobs) })
+            JobDetail(job: jobs[0], onRemove: { onRemove(jobs, $0) })
                 // 换任务时重新滚动到顶部。
                 .id(jobs[0].id)
         default:
-            MultipleSelection(jobs: jobs, onRemove: { onRemove(jobs) })
+            MultipleSelection(jobs: jobs, onRemove: { onRemove(jobs, $0) })
         }
     }
 }
@@ -27,7 +27,7 @@ struct JobInspector: View {
 /// 选中多个任务：数量和对这些任务的操作。和单个任务的详情一样，只列出可用的操作。
 private struct MultipleSelection: View {
     let jobs: [Job]
-    let onRemove: () -> Void
+    let onRemove: (JobRemoval) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -45,10 +45,19 @@ private struct MultipleSelection: View {
                         }
                     }
                 }
-                Button(role: .destructive, action: onRemove) {
-                    Text("移除…").frame(maxWidth: .infinity)
+                Button(role: .destructive) {
+                    onRemove(.keepingFiles)
+                } label: {
+                    Text("移除").frame(maxWidth: .infinity)
                 }
                 .disabled(!jobs.contains { model.canOperate(on: $0) })
+                if model.canTrashFiles(of: jobs) {
+                    Button(role: .destructive) {
+                        onRemove(.trashingFiles)
+                    } label: {
+                        Text("移除并删除文件…").frame(maxWidth: .infinity)
+                    }
+                }
             }
             .frame(maxWidth: 180)
             .buttonStyle(.bordered)
@@ -60,7 +69,7 @@ private struct MultipleSelection: View {
 /// 一个任务的详情。
 private struct JobDetail: View {
     let job: Job
-    let onRemove: () -> Void
+    let onRemove: (JobRemoval) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -129,8 +138,15 @@ private struct JobDetail: View {
                     JobActionButton(job: job, action: .reveal)
                 }
                 Spacer(minLength: 0)
-                Button("移除…", role: .destructive, action: onRemove)
-                    .disabled(!model.canOperate(on: job))
+                // 点按钮只移除任务；删除文件在按钮的菜单中，是不常用的破坏性操作。
+                Menu("移除") {
+                    Button("移除并删除文件…", role: .destructive) { onRemove(.trashingFiles) }
+                        .disabled(!model.canTrashFiles(of: [job]))
+                } primaryAction: {
+                    onRemove(.keepingFiles)
+                }
+                .fixedSize()
+                .disabled(!model.canOperate(on: job))
             }
             .labelStyle(.titleOnly)
             .padding()

@@ -38,7 +38,7 @@ private struct FerryCommands: Commands {
         }
         CommandMenu("任务") {
             // 主窗口不是当前窗口时没有选中的任务，这些操作都不可用。
-            JobActionsMenu(jobs: selection?.jobs ?? [], showsUnavailable: true) { selection?.onRemove($0) }
+            JobActionsMenu(jobs: selection?.jobs ?? [], showsUnavailable: true) { selection?.onRemove($0, $1) }
                 .environment(model)
             Divider()
             let jobs = model.coordinator.jobs

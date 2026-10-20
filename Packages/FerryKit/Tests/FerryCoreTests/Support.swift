@@ -261,6 +261,16 @@ final class Fixture {
     }
 
     var downloads: URL { directory.appendingPathComponent("downloads") }
+    /// 代替系统的废纸篓。
+    var trash: URL { directory.appendingPathComponent("trash") }
+
+    /// 把项目移到 `trash` 中。测试不使用系统的废纸篓。
+    static func trashItem(into trash: URL) -> @Sendable (URL) throws -> Void {
+        { url in
+            try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: url, to: trash.appending(path: "\(UUID().uuidString)-\(url.lastPathComponent)"))
+        }
+    }
 
     /// 已转存、文件列表已保存，但还没开始下载的任务。
     func makeTransferredJob() async throws -> Job {
@@ -295,7 +305,8 @@ final class Fixture {
                          folderAccess: any DownloadFolderAccess = SecurityScopedFolderAccess()) -> JobCoordinator {
         let coordinator = JobCoordinator(engine: makeEngine(), store: store, settings: settings,
                                          downloadFolder: DownloadFolder(url: downloadFolder ?? downloads),
-                                         folderAccess: folderAccess, baseConfiguration: Self.configuration)
+                                         folderAccess: folderAccess, trashItem: Self.trashItem(into: trash),
+                                         baseConfiguration: Self.configuration)
         coordinator.netdisk = netdisk
         coordinator.accountUK = Self.accountUK
         return coordinator

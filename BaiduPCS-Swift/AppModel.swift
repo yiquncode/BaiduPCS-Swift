@@ -30,6 +30,9 @@ final class AppModel {
 
     var sheet: Sheet?
 
+    /// 移除任务时没能移到废纸篓的文件或目录。界面提示后清空。
+    var untrashedItems: [URL] = []
+
     /// 登录 sheet 显示的登录方式。
     enum LoginMethod {
         case web
@@ -307,8 +310,16 @@ final class AppModel {
         Task { await coordinator.retry(job.id) }
     }
 
-    func remove(_ job: Job) {
-        Task { await coordinator.remove(job.id) }
+    /// 有可以操作、且有已下载文件的任务。
+    func canTrashFiles(of jobs: [Job]) -> Bool {
+        jobs.contains { canOperate(on: $0) && $0.files.contains(where: \.isCompleted) }
+    }
+
+    func remove(_ job: Job, trashingFiles: Bool = false) {
+        Task {
+            let failed = await coordinator.remove(job.id, trashingFiles: trashingFiles)
+            untrashedItems += failed
+        }
     }
 
     // MARK: - 通知

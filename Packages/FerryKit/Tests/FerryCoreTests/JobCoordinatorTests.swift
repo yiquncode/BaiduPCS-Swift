@@ -172,6 +172,25 @@ import Testing
         #expect(fixture.netdisk.remotePaths().isEmpty)
     }
 
+    @Test func removeTrashingFilesKeepsUserFiles() async throws {
+        let fixture = Fixture(share: ["Show/a.bin": randomData(1000), "Show/S1/b.bin": randomData(1000)])
+        // 下载目录中原来就有同名目录和用户自己的文件。
+        let show = fixture.downloads.appending(path: "Show")
+        try FileManager.default.createDirectory(at: show, withIntermediateDirectories: true)
+        try Data("mine".utf8).write(to: show.appending(path: "mine.txt"))
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        let failed = await coordinator.remove(job.id, trashingFiles: true)
+
+        #expect(failed.isEmpty)
+        #expect(coordinator.jobs.isEmpty)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: show.path) == ["mine.txt"])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.trash.path).count == 2)
+    }
+
     @Test func restoresDownloadsAfterRestart() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(400_000)])
         let first = fixture.makeCoordinator()
