@@ -1,5 +1,17 @@
+# Private, never committed: AI assistant instructions and state, design docs and plans.
+/CLAUDE.md
+CLAUDE.local.md
+/AGENTS.md
+.claude/
+/docs/
+/plans/
+
+# Machine-local build settings: the signing team (see Config/Shared.xcconfig).
+/Config/Local.xcconfig
+
+# Build output and per-user Xcode state.
 .build/
 .swiftpm/
 DerivedData/
 xcuserdata/
-.claude/
+.DS_Store
