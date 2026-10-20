@@ -2,7 +2,7 @@ import BaiduKit
 import FerryCore
 import SwiftUI
 
-/// 主窗口。没有任务且未登录时引导登录；否则显示侧边栏和任务列表（见 `MainView`）。
+/// 主窗口。没有任务且未登录时显示欢迎页；否则显示侧边栏和任务列表（见 `MainView`）。
 struct ContentView: View {
     static let windowID = "main"
 
@@ -13,16 +13,9 @@ struct ContentView: View {
         @Bindable var model = model
         Group {
             if model.account == nil && model.coordinator.jobs.isEmpty {
-                ContentUnavailableView {
-                    Label("登录百度网盘", systemImage: "person.crop.circle.badge.questionmark")
-                } description: {
-                    Text("在百度网盘的登录页登录后，可以粘贴分享链接下载文件。")
-                } actions: {
-                    Button("登录…") { model.presentLogin() }
-                        .buttonStyle(.borderedProminent)
-                }
-                .frame(minWidth: 560, minHeight: 360)
-                .safeAreaInset(edge: .top, spacing: 0) { Banners() }
+                WelcomeView()
+                    .frame(minWidth: 560, minHeight: 360)
+                    .safeAreaInset(edge: .top, spacing: 0) { Banners() }
             } else {
                 MainView()
             }

@@ -1,18 +1,13 @@
 import SwiftUI
 
-/// 登录 sheet。默认显示网页登录，可以切换到粘贴 Cookie 登录。
+/// 登录 sheet。先显示 `AppModel.loginMethod` 指定的方式，可以在网页登录和粘贴 Cookie 登录之间切换。
 struct LoginView: View {
-    private enum Method {
-        case web
-        case cookie
-    }
-
-    @State private var method = Method.web
+    @Environment(AppModel.self) private var model
 
     var body: some View {
-        switch method {
-        case .web: WebLoginView { method = .cookie }
-        case .cookie: CookieLoginView { method = .web }
+        switch model.loginMethod {
+        case .web: WebLoginView { model.loginMethod = .cookie }
+        case .cookie: CookieLoginView { model.loginMethod = .web }
         }
     }
 }

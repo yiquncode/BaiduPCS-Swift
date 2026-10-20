@@ -29,6 +29,15 @@ final class AppModel {
     }
 
     var sheet: Sheet?
+
+    /// 登录 sheet 显示的登录方式。
+    enum LoginMethod {
+        case web
+        case cookie
+    }
+
+    /// 打开登录 sheet 时设定，用户在 sheet 中可以切换。
+    var loginMethod = LoginMethod.web
     /// 主窗口关闭后，用它重新打开（例如点击 Dock 图标）。
     @ObservationIgnored var openMainWindow: (() -> Void)?
 
@@ -204,10 +213,16 @@ final class AppModel {
 
     /// 未登录时改为打开登录。
     func presentAddLink() {
-        sheet = account == nil ? .login : .addLink
+        if account == nil {
+            presentLogin()
+        } else {
+            sheet = .addLink
+        }
     }
 
-    func presentLogin() {
+    /// 默认显示网页登录。
+    func presentLogin(method: LoginMethod = .web) {
+        loginMethod = method
         sheet = .login
     }
 
