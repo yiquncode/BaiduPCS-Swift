@@ -7,7 +7,7 @@ struct MainView: View {
     @Environment(AppModel.self) private var model
     @State private var category: JobCategory? = .all
     @State private var selection: Set<Job.ID> = []
-    @SceneStorage("isInspectorPresented") private var isInspectorPresented = true
+    @SceneStorage("isInspectorPresented") private var isInspectorPresented = false
     @State private var searchText = ""
     /// 等待确认的移除。
     @State private var pendingRemoval: PendingRemoval?
