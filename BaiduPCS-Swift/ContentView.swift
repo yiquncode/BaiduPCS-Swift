@@ -15,7 +15,7 @@ struct ContentView: View {
             if model.account == nil && model.coordinator.jobs.isEmpty {
                 WelcomeView()
                     .frame(minWidth: 560, minHeight: 360)
-                    .safeAreaInset(edge: .top, spacing: 0) { Banners() }
+                    .safeAreaBar(edge: .top, spacing: 0) { Banners() }
             } else {
                 MainView()
             }
@@ -56,7 +56,7 @@ struct Banners: View {
     }
 }
 
-/// 一条提示条。
+/// 一条提示条。没有背景：放在 `safeAreaBar` 中时，由系统的滚动边缘效果把它和内容分开。
 struct Banner<Actions: View>: View {
     let message: String
     @ViewBuilder let actions: Actions
@@ -73,7 +73,6 @@ struct Banner<Actions: View>: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
-        .background(.bar)
         .accessibilityElement(children: .combine)
     }
 }

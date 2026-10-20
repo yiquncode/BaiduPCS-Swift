@@ -65,7 +65,7 @@ struct SidebarView: View {
                     .tag(category)
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .safeAreaBar(edge: .bottom, spacing: 0) {
             AccountView()
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)

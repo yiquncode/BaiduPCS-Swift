@@ -23,8 +23,8 @@ struct MainView: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
             JobListView(jobs: jobs, category: current, searchText: query, selection: $selection, onRemove: requestRemoval)
-                .safeAreaInset(edge: .top, spacing: 0) { Banners() }
-                .safeAreaInset(edge: .bottom, spacing: 0) { StatusBar() }
+                .safeAreaBar(edge: .top, spacing: 0) { Banners() }
+                .safeAreaBar(edge: .bottom, spacing: 0) { StatusBar() }
                 .navigationTitle(current.title)
                 .navigationSubtitle("\(categoryJobs.count) 个任务")
                 .searchable(text: $searchText, placement: .toolbar, prompt: "搜索任务")
@@ -148,7 +148,5 @@ private struct StatusBar: View {
         .lineLimit(1)
         .padding(.horizontal)
         .padding(.vertical, 6)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
     }
 }

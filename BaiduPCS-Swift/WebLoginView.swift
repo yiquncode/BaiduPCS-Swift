@@ -34,15 +34,19 @@ struct WebLoginView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if let errorMessage {
-                Banner(message: errorMessage) {
-                    Button("重试", action: retry)
-                }
-            } else if session?.isMissingNetdiskSTOKEN == true {
-                Banner(message: "已登录百度账号，但没有取得网盘的 STOKEN，无法转存。请改用粘贴 Cookie 登录。") {
-                    Button("粘贴 Cookie 登录…", action: useCookieLogin)
+            // 网页不是 SwiftUI 的滚动视图，没有滚动边缘效果，所以提示条自己加背景。
+            Group {
+                if let errorMessage {
+                    Banner(message: errorMessage) {
+                        Button("重试", action: retry)
+                    }
+                } else if session?.isMissingNetdiskSTOKEN == true {
+                    Banner(message: "已登录百度账号，但没有取得网盘的 STOKEN，无法转存。请改用粘贴 Cookie 登录。") {
+                        Button("粘贴 Cookie 登录…", action: useCookieLogin)
+                    }
                 }
             }
+            .background(.bar)
 
             Divider()
             HStack {

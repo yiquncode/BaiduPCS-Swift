@@ -112,7 +112,7 @@ private struct JobDetail: View {
             }
         }
         .formStyle(.grouped)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .safeAreaBar(edge: .bottom, spacing: 0) {
             HStack {
                 if let action = job.primaryAction, action != .reveal {
                     JobActionButton(job: job, action: action)
@@ -126,8 +126,6 @@ private struct JobDetail: View {
             }
             .labelStyle(.titleOnly)
             .padding()
-            .background(.bar)
-            .overlay(alignment: .top) { Divider() }
         }
     }
 }
