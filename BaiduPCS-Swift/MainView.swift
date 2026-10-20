@@ -7,23 +7,27 @@ struct MainView: View {
     @State private var category: JobCategory? = .all
     @State private var selection: Set<Job.ID> = []
     @SceneStorage("isInspectorPresented") private var isInspectorPresented = true
+    @State private var searchText = ""
     /// 等待确认移除的任务。
     @State private var pendingRemoval: [Job] = []
 
     var body: some View {
         let current = category ?? .all
-        let jobs = model.coordinator.jobs.filter(current.contains)
-        // 只算当前列表中的任务。切换分类后，看不到的任务不再算作选中。
+        let categoryJobs = model.coordinator.jobs.filter(current.contains)
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let jobs = query.isEmpty ? categoryJobs : categoryJobs.filter { $0.matches(query) }
+        // 只算列表中显示的任务。切换分类或搜索后，看不到的任务不再算作选中。
         let selectedJobs = jobs.filter { selection.contains($0.id) }
         NavigationSplitView {
             SidebarView(selection: $category)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
-            JobListView(jobs: jobs, category: current, selection: $selection, onRemove: requestRemoval)
+            JobListView(jobs: jobs, category: current, searchText: query, selection: $selection, onRemove: requestRemoval)
                 .safeAreaInset(edge: .top, spacing: 0) { Banners() }
                 .safeAreaInset(edge: .bottom, spacing: 0) { StatusBar() }
                 .navigationTitle(current.title)
-                .navigationSubtitle("\(jobs.count) 个任务")
+                .navigationSubtitle("\(categoryJobs.count) 个任务")
+                .searchable(text: $searchText, placement: .toolbar, prompt: "搜索任务")
                 .inspector(isPresented: $isInspectorPresented) {
                     JobInspector(jobs: selectedJobs, onRemove: requestRemoval)
                         .inspectorColumnWidth(min: 260, ideal: 320, max: 480)
@@ -36,6 +40,9 @@ struct MainView: View {
                             Label("添加链接", systemImage: "plus")
                         }
                         .help("添加分享链接（⌘N）")
+                    }
+                    ToolbarItem(placement: .primaryAction) {
+                        PauseResumeAllButton()
                     }
                     ToolbarItem(placement: .primaryAction) {
                         Button {
@@ -86,6 +93,31 @@ struct MainView: View {
         for job in jobs {
             selection.remove(job.id)
             model.remove(job)
+        }
+    }
+}
+
+/// 有下载中且未暂停的任务时为“全部暂停”；否则有已暂停的任务时为“全部继续”；两者都没有时为不可用的“全部暂停”。
+private struct PauseResumeAllButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let jobs = model.coordinator.jobs
+        if model.pausableJobs(in: jobs).isEmpty, !model.resumableJobs(in: jobs).isEmpty {
+            Button {
+                model.resumeAll(jobs)
+            } label: {
+                Label("全部继续", systemImage: "play.fill")
+            }
+            .help("全部继续")
+        } else {
+            Button {
+                model.pauseAll(jobs)
+            } label: {
+                Label("全部暂停", systemImage: "pause.fill")
+            }
+            .help("全部暂停")
+            .disabled(model.pausableJobs(in: jobs).isEmpty)
         }
     }
 }

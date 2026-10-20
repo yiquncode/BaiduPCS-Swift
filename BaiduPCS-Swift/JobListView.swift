@@ -2,10 +2,12 @@ import BaiduKit
 import FerryCore
 import SwiftUI
 
-/// 任务列表。只显示当前分类中的任务。
+/// 任务列表。只显示当前分类中、符合搜索的任务。
 struct JobListView: View {
     let jobs: [Job]
     let category: JobCategory
+    /// 搜索的文字。不搜索时为空。
+    let searchText: String
     @Binding var selection: Set<Job.ID>
     /// 请求移除任务。调用方决定是否先确认。
     let onRemove: ([Job]) -> Void
@@ -21,6 +23,8 @@ struct JobListView: View {
                 } actions: {
                     Button("添加链接…") { model.presentAddLink() }
                 }
+            } else if !searchText.isEmpty {
+                ContentUnavailableView.search(text: searchText)
             } else {
                 ContentUnavailableView(category.emptyTitle, systemImage: category.systemImage)
             }
@@ -126,6 +130,11 @@ extension Job {
         case .failed: .retry
         case .completed: revealURLs.isEmpty ? nil : .reveal
         }
+    }
+
+    /// 标题或任意文件名包含 `text`，不区分大小写。
+    func matches(_ text: String) -> Bool {
+        title.localizedCaseInsensitiveContains(text) || files.contains { $0.name.localizedCaseInsensitiveContains(text) }
     }
 
     var systemImage: String {

@@ -1,3 +1,4 @@
+import FerryCore
 import SwiftUI
 
 @main
@@ -31,6 +32,13 @@ private struct FerryCommands: Commands {
                 model.presentAddLink()
             }
             .keyboardShortcut("n")
+        }
+        CommandMenu("任务") {
+            let jobs = model.coordinator.jobs
+            Button("全部暂停") { model.pauseAll(jobs) }
+                .disabled(model.pausableJobs(in: jobs).isEmpty)
+            Button("全部继续") { model.resumeAll(jobs) }
+                .disabled(model.resumableJobs(in: jobs).isEmpty)
         }
     }
 }
