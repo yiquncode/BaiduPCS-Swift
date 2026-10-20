@@ -144,7 +144,7 @@ import Testing
         #expect(configuration.maxConcurrentFiles == 1)
         #expect(configuration.segmentsPerFile == FerrySettings.connectionsRange.upperBound)
         #expect(FerrySettings().transferFolder == "/Ferry")
-        #expect(!FerrySettings().cleanupAfterDownload)
+        #expect(FerrySettings().cleanupAfterDownload)
     }
 
     @Test func settingsLimitTotalConnections() throws {

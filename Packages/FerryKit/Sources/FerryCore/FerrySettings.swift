@@ -14,7 +14,7 @@ public struct FerrySettings: Codable, Sendable, Hashable {
     /// 切换到 Ferry 时，剪贴板中有新复制的分享链接就打开“添加链接”。
     public var detectsCopiedLinks: Bool
 
-    public init(downloadDirectoryBookmark: Data? = nil, transferFolder: String = "/Ferry", cleanupAfterDownload: Bool = false,
+    public init(downloadDirectoryBookmark: Data? = nil, transferFolder: String = "/Ferry", cleanupAfterDownload: Bool = true,
                 maxConcurrentFiles: Int = 1, connectionsPerFile: Int = 1, proxy: ProxySettings = ProxySettings(),
                 detectsCopiedLinks: Bool = true) {
         self.downloadDirectoryBookmark = downloadDirectoryBookmark

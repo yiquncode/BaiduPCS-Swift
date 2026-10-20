@@ -301,7 +301,7 @@ final class Fixture {
                        configuration: Self.configuration, session: session)
     }
 
-    func makeCoordinator(settings: FerrySettings = FerrySettings(maxConcurrentFiles: 4), downloadFolder: URL? = nil,
+    func makeCoordinator(settings: FerrySettings = FerrySettings(cleanupAfterDownload: false, maxConcurrentFiles: 4), downloadFolder: URL? = nil,
                          folderAccess: any DownloadFolderAccess = SecurityScopedFolderAccess()) -> JobCoordinator {
         let coordinator = JobCoordinator(engine: makeEngine(), store: store, settings: settings,
                                          downloadFolder: DownloadFolder(url: downloadFolder ?? downloads),
