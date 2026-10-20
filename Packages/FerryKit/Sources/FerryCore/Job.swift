@@ -142,9 +142,93 @@ public enum RemotePath {
     }
 
     /// 网盘路径去掉任务子目录前缀，得到本地相对路径。不在子目录中时返回 nil。
+    ///
+    /// 按 UTF-8 的 `/` 切分路径，逐个比较 Unicode 规范化（NFC）后的分量。不用 `hasPrefix`：
+    /// 它按字符簇比较，分量开头的组合字符会和前面的 `/` 合成一个字符簇。
     public static func relativePath(of path: String, in directory: String) -> String? {
-        let prefix = directory.hasSuffix("/") ? directory : directory + "/"
-        guard path.hasPrefix(prefix), path.count > prefix.count else { return nil }
-        return String(path.dropFirst(prefix.count))
+        let prefix = components(of: directory, omittingEmpty: true)
+        var parts = components(of: path, omittingEmpty: false)
+        guard parts.first?.isEmpty == true else { return nil }
+        parts.removeFirst()
+        guard parts.count > prefix.count else { return nil }
+        for (expected, actual) in zip(prefix, parts) where !isSameComponent(expected, actual) {
+            return nil
+        }
+        return parts[prefix.count...].joined(separator: "/")
+    }
+
+    static func components(of path: String, omittingEmpty: Bool) -> [String] {
+        path.utf8.split(separator: UInt8(ascii: "/"), omittingEmptySubsequences: omittingEmpty)
+            .map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    static func isSameComponent(_ a: String, _ b: String) -> Bool {
+        a.precomposedStringWithCanonicalMapping.utf8.elementsEqual(b.precomposedStringWithCanonicalMapping.utf8)
+    }
+}
+
+/// 本地相对路径的校验和去重。
+public enum LocalPath {
+    /// 没有空分量、`.`、`..` 和 NUL。
+    public static func isSafe(_ relativePath: String) -> Bool {
+        let parts = RemotePath.components(of: relativePath, omittingEmpty: false)
+        return !parts.isEmpty && parts.allSatisfy { part in
+            !part.isEmpty && part != "." && part != ".." && !part.utf8.contains(0)
+        }
+    }
+
+    /// 相对路径在 `directory` 中的位置。路径不安全或不在 `directory` 之内时返回 nil。
+    public static func destination(for relativePath: String, in directory: URL) -> URL? {
+        guard isSafe(relativePath) else { return nil }
+        var url = directory
+        for part in RemotePath.components(of: relativePath, omittingEmpty: false) {
+            url.append(component: part, directoryHint: .notDirectory)
+        }
+        let base = directory.standardizedFileURL.pathComponents
+        let target = url.standardizedFileURL.pathComponents
+        guard target.count > base.count,
+              zip(base, target).allSatisfy({ $0.utf8.elementsEqual($1.utf8) }) else { return nil }
+        return url
+    }
+
+    /// 忽略大小写和 Unicode 规范化后相同的路径在 macOS 上是同一个文件。后出现的文件改名为 "name (1).ext" 等。
+    /// 文件和另一个文件所在的目录同名时，文件改名。
+    public static func deduplicated(_ paths: [String]) -> [String] {
+        var directories = Set<String>()
+        for path in paths {
+            let parts = RemotePath.components(of: path, omittingEmpty: false)
+            for end in parts.indices.dropLast() {
+                directories.insert(key(parts[...end].joined(separator: "/")))
+            }
+        }
+        var used = Set<String>()
+        return paths.map { path in
+            var candidate = path
+            var number = 1
+            while directories.contains(key(candidate)) || used.contains(key(candidate)) {
+                candidate = numbered(path, number)
+                number += 1
+            }
+            used.insert(key(candidate))
+            return candidate
+        }
+    }
+
+    static func key(_ path: String) -> String {
+        path.decomposedStringWithCanonicalMapping.folding(options: .caseInsensitive, locale: nil)
+            .decomposedStringWithCanonicalMapping
+    }
+
+    /// `a/b.tar.gz` → `a/b.tar (1).gz`。以点开头且没有其他点的名字没有扩展名。
+    static func numbered(_ path: String, _ number: Int) -> String {
+        var parts = RemotePath.components(of: path, omittingEmpty: false)
+        let name = parts.removeLast()
+        let renamed: String
+        if let dot = name.lastIndex(of: "."), dot != name.startIndex {
+            renamed = "\(name[..<dot]) (\(number))\(name[dot...])"
+        } else {
+            renamed = "\(name) (\(number))"
+        }
+        return (parts + [renamed]).joined(separator: "/")
     }
 }

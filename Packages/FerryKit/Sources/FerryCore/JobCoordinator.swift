@@ -243,16 +243,21 @@ public final class JobCoordinator {
             try await netdisk.createDirectory(job.remoteDirectory)
             try await netdisk.transfer(share, entries: job.entries, to: job.remoteDirectory)
             let remoteFiles = try await netdisk.listFilesRecursively(job.remoteDirectory)
-            try Task.checkCancellation()
-
-            let files = remoteFiles.compactMap { file in
-                RemotePath.relativePath(of: file.path, in: job.remoteDirectory)
-                    .map { JobFile(remotePath: file.path, relativePath: $0, size: file.size) }
+            var warning: String?
+            if remoteFiles.isEmpty {
+                // 刚转存的文件可能还没出现在列表中。只有确认勾选的都是空目录时，才没有文件需要下载。
+                guard try await !containsFiles(job.entries, share: share, netdisk: netdisk) else {
+                    throw TransferCheckError.noFiles
+                }
+                warning = "勾选的目录中没有文件，不需要下载。"
             }
+            try Task.checkCancellation()
+            let files = try Self.jobFiles(for: remoteFiles, in: job.remoteDirectory)
             update(id) {
                 $0.files = files
                 $0.phase = .downloading
                 $0.isCleanedUp = false
+                $0.warning = warning
             }
             save()
             do {
@@ -268,13 +273,47 @@ public final class JobCoordinator {
         }
     }
 
+    /// 转存后的网盘文件 → 文件下载。任何一个文件不在任务子目录中或路径不安全时抛出错误，不静默丢掉文件。
+    static func jobFiles(for remoteFiles: [RemoteFile], in remoteDirectory: String) throws -> [JobFile] {
+        let relativePaths = try remoteFiles.map { file in
+            guard let relativePath = RemotePath.relativePath(of: file.path, in: remoteDirectory) else {
+                throw TransferCheckError.outsideJobDirectory(file.path)
+            }
+            guard LocalPath.isSafe(relativePath) else { throw TransferCheckError.unsafePath(file.path) }
+            return relativePath
+        }
+        return zip(remoteFiles, LocalPath.deduplicated(relativePaths)).map { file, relativePath in
+            JobFile(remotePath: file.path, relativePath: relativePath, size: file.size)
+        }
+    }
+
+    /// 勾选的条目中是否有文件。目录逐层列出，找到第一个文件就停止。
+    private func containsFiles(_ entries: [ShareEntry], share: ShareSession, netdisk: any Netdisk) async throws -> Bool {
+        var directories: [ShareEntry] = []
+        for entry in entries {
+            guard entry.isDirectory else { return true }
+            directories.append(entry)
+        }
+        while let directory = directories.popLast() {
+            try Task.checkCancellation()
+            for child in try await netdisk.listShare(share, directory: directory) {
+                guard child.isDirectory else { return true }
+                directories.append(child)
+            }
+        }
+        return false
+    }
+
     // MARK: - 下载
 
     private func enqueue(_ files: [JobFile], paused: Bool) async throws {
         for file in files {
+            guard let destination = LocalPath.destination(for: file.relativePath, in: downloadDirectory) else {
+                throw TransferCheckError.unsafePath(file.relativePath)
+            }
             try await engine.enqueue(DownloadRequest(
                 id: file.id,
-                destination: downloadDirectory.appending(path: file.relativePath),
+                destination: destination,
                 expectedSize: file.size,
                 context: BaiduDownloadSource.context(forRemotePath: file.remotePath)
             ))
@@ -408,6 +447,23 @@ public final class JobCoordinator {
         case let failure as DownloadFailure: failure.message
         case let error as LocalizedError: error.errorDescription ?? error.localizedDescription
         default: error.localizedDescription
+        }
+    }
+}
+
+enum TransferCheckError: LocalizedError {
+    case noFiles
+    case outsideJobDirectory(String)
+    case unsafePath(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .noFiles:
+            "转存后网盘中没有找到文件，可能转存尚未完成，请重试。"
+        case .outsideJobDirectory(let path):
+            "转存后的文件“\(path)”不在任务子目录中，无法确定保存位置。"
+        case .unsafePath(let path):
+            "文件路径“\(path)”不能用作本地文件名，下载已停止。"
         }
     }
 }

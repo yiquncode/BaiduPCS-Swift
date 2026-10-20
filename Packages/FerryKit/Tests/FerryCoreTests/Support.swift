@@ -17,7 +17,11 @@ final class FakeNetdisk: Netdisk {
 
     private struct State {
         var share: [String: Data] = [:]
+        /// 分享中没有文件的目录（相对路径）。
+        var emptyDirectories: Set<String> = []
         var disk: [String: Data] = [:]
+        /// 下一次列目录返回这个结果，模拟转存后列表还没更新或返回了意外的路径。
+        var nextListing: [RemoteFile]?
         var operations: [Operation] = []
         var transferFailures = 0
         var deleteFailures = 0
@@ -25,8 +29,11 @@ final class FakeNetdisk: Netdisk {
 
     private let state = Mutex(State())
 
-    init(share: [String: Data]) {
-        state.withLock { $0.share = share }
+    init(share: [String: Data], emptyDirectories: Set<String> = []) {
+        state.withLock {
+            $0.share = share
+            $0.emptyDirectories = emptyDirectories
+        }
     }
 
     var operations: [Operation] { state.withLock { $0.operations } }
@@ -36,6 +43,7 @@ final class FakeNetdisk: Netdisk {
     /// 下一次转存复制一个条目后失败，模拟转存到一半中断。
     func failNextTransfer() { state.withLock { $0.transferFailures += 1 } }
     func failNextDelete() { state.withLock { $0.deleteFailures += 1 } }
+    func setNextListing(_ files: [RemoteFile]) { state.withLock { $0.nextListing = files } }
 
     func openShare(_ link: ShareLink, password: String?) async throws -> ShareSession {
         state.withLock { $0.operations.append(.openShare) }
@@ -64,9 +72,18 @@ final class FakeNetdisk: Netdisk {
         }
     }
 
+    func listShare(_ session: ShareSession, directory: ShareEntry?) async throws -> [ShareEntry] {
+        let prefix = directory.map { $0.relativePath + "/" } ?? ""
+        return entries(under: prefix)
+    }
+
     func listFilesRecursively(_ path: String) async throws -> [RemoteFile] {
         state.withLock { state in
             state.operations.append(.list(path))
+            if let listing = state.nextListing {
+                state.nextListing = nil
+                return listing
+            }
             return state.disk.filter { $0.key.hasPrefix(path + "/") }.sorted { $0.key < $1.key }
                 .enumerated().map { RemoteFile(path: $1.key, size: Int64($1.value.count), fsID: Int64($0)) }
         }
@@ -90,11 +107,20 @@ final class FakeNetdisk: Netdisk {
 
     /// 分享根目录中的条目。
     func rootEntries() -> [ShareEntry] {
-        let names = Set(state.withLock { $0.share.keys }.map { String($0.split(separator: "/")[0]) })
+        entries(under: "")
+    }
+
+    /// `prefix` 为空或以 `/` 结尾的相对目录。
+    private func entries(under prefix: String) -> [ShareEntry] {
+        let (share, emptyDirectories) = state.withLock { ($0.share, $0.emptyDirectories) }
+        let paths = Array(share.keys) + Array(emptyDirectories)
+        let names = Set(paths.filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count).split(separator: "/")[0]) })
+        let directory = String(prefix.dropLast())
         return names.sorted().enumerated().map { index, name in
-            let isDirectory = state.withLock { $0.share[name] == nil }
-            let size = Int64(state.withLock { $0.share[name]?.count ?? 0 })
-            return ShareEntry(fsID: Int64(index + 100), name: name, path: "/share/" + name, isDirectory: isDirectory, size: size)
+            let path = prefix + name
+            let isDirectory = share[path] == nil
+            return ShareEntry(fsID: Int64(path.hashValue), name: name, path: "/share/" + path, isDirectory: isDirectory,
+                              size: Int64(share[path]?.count ?? 0), relativeDirectory: directory)
         }
     }
 }
@@ -221,9 +247,9 @@ final class Fixture {
     let server: FileServer
     let session = FileProtocol.makeSession()
 
-    init(share: [String: Data]) {
+    init(share: [String: Data], emptyDirectories: Set<String> = []) {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("FerryCoreTests-\(UUID().uuidString)")
-        netdisk = FakeNetdisk(share: share)
+        netdisk = FakeNetdisk(share: share, emptyDirectories: emptyDirectories)
         server = FileServer(netdisk: netdisk)
     }
 

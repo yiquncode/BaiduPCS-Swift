@@ -263,6 +263,77 @@ import Testing
         #expect(fixture.contents("a.bin") == fixture.netdisk.data(at: job.remoteDirectory + "/a.bin"))
     }
 
+    @Test func failsWhenTransferredFilesAreMissing() async throws {
+        let fixture = Fixture(share: ["docs/a.bin": randomData(1_000)])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        fixture.netdisk.setNextListing([])
+
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        #expect(coordinator.job(job.id)?.error?.contains("没有找到文件") == true)
+
+        await coordinator.retry(job.id)
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        #expect(fixture.contents("docs/a.bin") == fixture.netdisk.data(at: job.remoteDirectory + "/docs/a.bin"))
+    }
+
+    @Test func completesWhenOnlyEmptyDirectoriesAreSelected() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10)], emptyDirectories: ["empty", "nested/inner"])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+
+        let entries = fixture.netdisk.rootEntries().filter(\.isDirectory)
+        #expect(entries.map(\.name) == ["empty", "nested"])
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: entries)
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        let finished = try #require(coordinator.job(job.id))
+        #expect(finished.files.isEmpty)
+        #expect(finished.warning?.contains("没有文件") == true)
+    }
+
+    @Test func failsWhenListedFileIsOutsideJobDirectory() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10)])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        fixture.netdisk.setNextListing([RemoteFile(path: "/elsewhere/a.bin", size: 10, fsID: 1)])
+
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        #expect(coordinator.job(job.id)?.error?.contains("/elsewhere/a.bin") == true)
+        #expect(coordinator.job(job.id)?.files.isEmpty == true)
+    }
+
+    @Test func failsOnUnsafeRelativePath() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10)])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: [])
+        fixture.netdisk.setNextListing([
+            RemoteFile(path: job.remoteDirectory + "/a.bin", size: 10, fsID: 1),
+            RemoteFile(path: job.remoteDirectory + "/x/../../escape.bin", size: 10, fsID: 2),
+        ])
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        #expect(coordinator.job(job.id)?.error?.contains("escape.bin") == true)
+        #expect(!FileManager.default.fileExists(atPath: fixture.directory.appending(path: "escape.bin").path))
+    }
+
+    @Test func renamesFilesThatCollideOnDisk() async throws {
+        let share = ["Docs/a.txt": randomData(1_000), "docs/A.TXT": randomData(2_000)]
+        let fixture = Fixture(share: share)
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        let files = try #require(coordinator.job(job.id)?.files)
+        #expect(Set(files.map(\.relativePath)) == ["Docs/a.txt", "docs/A (1).TXT"])
+        for file in files {
+            let data = try #require(file.localURL.map { try Data(contentsOf: $0) })
+            #expect(data == fixture.netdisk.data(at: file.remotePath))
+        }
+    }
+
     @Test func failsWithoutLogin() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(10)])
         let coordinator = fixture.makeCoordinator()

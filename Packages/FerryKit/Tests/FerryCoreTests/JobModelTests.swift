@@ -27,8 +27,34 @@ import Testing
         #expect(RemotePath.relativePath(of: "/Ferry/ABCD/docs/2024/b c.txt", in: "/Ferry/ABCD") == "docs/2024/b c.txt")
         #expect(RemotePath.relativePath(of: "/Ferry/ABCDE/a.zip", in: "/Ferry/ABCD") == nil)
         #expect(RemotePath.relativePath(of: "/Ferry/ABCD", in: "/Ferry/ABCD") == nil)
+        #expect(RemotePath.relativePath(of: "/Ferry/ABCD/", in: "/Ferry/ABCD") == "")
+        #expect(RemotePath.relativePath(of: "Ferry/ABCD/a", in: "/Ferry/ABCD") == nil)
+        // 分量按 NFC 比较；分量开头的组合字符不影响前缀判断。
+        #expect(RemotePath.relativePath(of: "/Ferry/\u{E9}/a", in: "/Ferry/e\u{301}") == "a")
+        #expect(RemotePath.relativePath(of: "/Ferry/X/\u{301}a", in: "/Ferry/X") == "\u{301}a")
+        #expect(RemotePath.relativePath(of: "/Ferry/X\u{301}/a", in: "/Ferry/X") == nil)
         #expect(RemotePath.normalized("//a//b/") == "/a/b")
         #expect(RemotePath.normalized("") == "/")
+    }
+
+    @Test func rejectsUnsafeLocalPaths() {
+        let base = URL(filePath: "/tmp/dl")
+        for path in ["", ".", "..", "a/../../b", "a//b", "a/", "./a", "a/\u{0}b"] {
+            #expect(!LocalPath.isSafe(path), "\(path)")
+            #expect(LocalPath.destination(for: path, in: base) == nil, "\(path)")
+        }
+        #expect(LocalPath.destination(for: "docs/a b.txt", in: base)?.path == "/tmp/dl/docs/a b.txt")
+        #expect(LocalPath.destination(for: "...", in: base)?.path == "/tmp/dl/...")
+    }
+
+    @Test func renamesPathsThatCollideOnDisk() {
+        let paths = ["Docs/a.txt", "docs/A.TXT", "e\u{301}.txt", "\u{E9}.txt", "x.tar.gz", "X.tar.gz", ".env", ".ENV",
+                     "dir", "dir/file", "plain"]
+        #expect(LocalPath.deduplicated(paths) == [
+            "Docs/a.txt", "docs/A (1).TXT", "e\u{301}.txt", "\u{E9} (1).txt", "x.tar.gz", "X.tar (1).gz", ".env", ".ENV (1)",
+            "dir (1)", "dir/file", "plain",
+        ])
+        #expect(LocalPath.deduplicated(["a.txt", "A.txt", "a (1).txt"]) == ["a.txt", "A (1).txt", "a (1) (1).txt"])
     }
 
     @Test func revealURLsPointAtTopLevelItems() {
