@@ -10,26 +10,45 @@ struct StoredLogin: Codable {
 
 /// 把登录信息保存在 Keychain 中。
 enum CredentialStore {
-    private static let service = Bundle.main.bundleIdentifier ?? "Ferry"
-    private static let account = "baidu-login"
+    private static let item = KeychainItem(account: "baidu-login", name: "登录信息")
 
-    private static var query: [String: Any] {
+    static func load() -> StoredLogin? {
+        item.load().flatMap { try? JSONDecoder().decode(StoredLogin.self, from: $0) }
+    }
+
+    static func save(_ login: StoredLogin) throws {
+        try item.save(JSONEncoder().encode(login))
+    }
+
+    static func delete() {
+        item.delete()
+    }
+}
+
+/// Keychain 中的一项通用密码。service 是应用的 bundle id。
+private struct KeychainItem {
+    let account: String
+    /// 保存失败时提示中的名称。
+    let name: String
+
+    private static let service = Bundle.main.bundleIdentifier ?? "Ferry"
+
+    private var query: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: service,
+         kSecAttrService as String: Self.service,
          kSecAttrAccount as String: account]
     }
 
-    static func load() -> StoredLogin? {
+    func load() -> Data? {
         var query = query
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
-        return try? JSONDecoder().decode(StoredLogin.self, from: data)
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
     }
 
-    static func save(_ login: StoredLogin) throws {
-        let data = try JSONEncoder().encode(login)
+    func save(_ data: Data) throws {
         let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
             var item = query
@@ -41,14 +60,14 @@ enum CredentialStore {
         }
     }
 
-    static func delete() {
+    func delete() {
         SecItemDelete(query as CFDictionary)
     }
 
-    private static func check(_ status: OSStatus) throws {
+    private func check(_ status: OSStatus) throws {
         guard status == errSecSuccess else {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status),
-                          userInfo: [NSLocalizedDescriptionKey: "无法把登录信息保存到钥匙串（\(status)）。"])
+                          userInfo: [NSLocalizedDescriptionKey: "无法把\(name)保存到钥匙串（\(status)）。"])
         }
     }
 }
