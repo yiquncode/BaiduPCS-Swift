@@ -18,8 +18,6 @@ struct JobListView: View {
             if model.coordinator.jobs.isEmpty, model.account == nil {
                 ContentUnavailableView {
                     Label("没有任务", systemImage: "tray.and.arrow.down")
-                } description: {
-                    Text("登录百度网盘后，粘贴分享链接，选择要下载的文件。")
                 } actions: {
                     Button("登录…") { model.presentLogin() }
                 }
