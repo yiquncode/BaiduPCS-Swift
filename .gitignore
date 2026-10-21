@@ -15,3 +15,6 @@ CLAUDE.local.md
 DerivedData/
 xcuserdata/
 .DS_Store
+
+# Wrangler local state for the website.
+.wrangler/

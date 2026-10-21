@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ferry · 百度网盘下载工具，macOS 版</title>
+<meta name="description" content="Ferry 是一款百度网盘下载工具，macOS 版。使用 Swift 开发、隐私优先，专注于稳定、高效地下载文件。">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  --bg: #ffffff;
+  --fg: #0a0a0a;
+  --muted: #66677a;
+  --card: #eef0f1;
+  --stage-top: #c9ccd6;
+  --stage-mid: #dad7cf;
+  --stage: #8fb6d9;
+  --glow: rgba(255, 255, 255, 0.55);
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(128, 128, 128, 0.4);
+  text-underline-offset: 4px;
+}
+a:hover { text-decoration-color: currentColor; }
+
+p, h1, h2, dl, dd, ol, ul, figure { margin: 0; }
+
+.column {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* Hero */
+.hero {
+  padding-top: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.hero img { display: block; width: 96px; height: 96px; }
+.hero h1 { margin-top: 20px; font-size: 32px; line-height: 64px; font-weight: 500; }
+.tagline { margin-top: 4px; line-height: 20px; color: var(--muted); }
+.lede { margin-top: 28px; max-width: 520px; line-height: 28px; color: var(--muted); }
+
+.actions {
+  margin-top: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.pill {
+  height: 40px;
+  padding: 0 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 9999px;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.13px;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+.pill:hover { opacity: 0.82; }
+.pill-primary { background: var(--fg); color: var(--bg); }
+.pill-secondary { gap: 6px; background: var(--card); color: var(--fg); }
+.requirement { margin-left: 8px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+/* Screenshot */
+.shot {
+  max-width: 1152px;
+  margin: 80px auto 0;
+  padding: 0 24px;
+}
+.stage {
+  border-radius: 16px;
+  overflow: hidden;
+  padding: 56px 72px 64px;
+  background:
+    radial-gradient(900px 300px at 50% 100%, var(--glow), rgba(255, 255, 255, 0) 70%),
+    linear-gradient(180deg, var(--stage-top) 0%, var(--stage-mid) 38%, var(--stage) 100%);
+}
+.stage img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 24px 48px rgba(10, 10, 10, 0.28));
+}
+
+/* Sections */
+.sections {
+  margin-top: 112px;
+  display: flex;
+  flex-direction: column;
+  gap: 72px;
+}
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  line-height: 28px;
+}
+.section h2 { font-size: 16px; line-height: 28px; font-weight: 400; color: var(--muted); }
+.section ol, .section ul, .section dl {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.section li.step { display: flex; gap: 20px; }
+.step-number { width: 12px; flex-shrink: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+.step > div { min-width: 0; }
+.title, dt { font-weight: 600; }
+.detail, dd { color: var(--muted); }
+
+footer {
+  padding-bottom: 96px;
+  font-size: 13px;
+  line-height: 22px;
+  color: var(--muted);
+}
+
+/* Motion */
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes ferry { 0% { opacity: 0; transform: translateX(-32px); } 60% { opacity: 1; } 100% { opacity: 1; transform: none; } }
+.ferry-in { animation: ferry 1.4s cubic-bezier(0.16, 0.8, 0.24, 1) 0.1s both; }
+@media (prefers-reduced-motion: reduce) {
+  .rise, .ferry-in { animation: none; }
+}
+
+@media (max-width: 900px) {
+  .hero { padding-top: 72px; }
+  .shot { margin-top: 56px; padding: 0 16px; }
+  .stage { padding: 28px 16px 32px; }
+  .sections { margin-top: 80px; }
+}
+</style>
+</head>
+<body>
+<main>
+
+<header class="hero column rise">
+  <img class="ferry-in" src="/assets/icon.png" alt="Ferry 的应用图标" width="96" height="96">
+  <h1>Ferry</h1>
+  <p class="tagline">百度网盘下载工具，macOS 版</p>
+  <p class="lede">使用 Swift 开发、隐私优先，专注于稳定、高效地下载文件。</p>
+  <div class="actions">
+    <a class="pill pill-primary" href="https://github.com/yiquncode/BaiduPCS-Swift/releases/latest">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12"/><path d="m6 11 6 6 6-6"/><path d="M5 20h14"/></svg>
+      <span lang="en">Download</span>
+    </a>
+    <a class="pill pill-secondary" href="https://github.com/yiquncode/BaiduPCS-Swift">
+      <span lang="en">GitHub</span>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>
+    </a>
+    <span class="requirement" lang="en">macOS 14.0+</span>
+  </div>
+</header>
+
+<figure class="shot rise" style="animation-delay: 0.12s">
+  <div class="stage">
+    <img
+      src="/assets/screenshot@1x.webp"
+      srcset="/assets/screenshot@1x.webp 1100w, /assets/screenshot@2x.webp 2200w"
+      sizes="(max-width: 900px) calc(100vw - 64px), (max-width: 1152px) calc(100vw - 192px), 960px"
+      width="2200" height="1400"
+      alt="Ferry 主窗口：侧栏按状态分类，列表里是转存中、下载中和已完成的任务">
+  </div>
+</figure>
+
+<div class="sections">
+
+  <section class="section column rise" style="animation-delay: 0.24s">
+    <h2>用法</h2>
+    <ol>
+      <li class="step">
+        <span class="step-number">1</span>
+        <div><p class="title">登录百度账号</p><p class="detail">在百度的官方登录页中登录。</p></div>
+      </li>
+      <li class="step">
+        <span class="step-number">2</span>
+        <div><p class="title">复制分享链接</p><p class="detail">切到 Ferry，它读取剪贴板中的链接和提取码。</p></div>
+      </li>
+      <li class="step">
+        <span class="step-number">3</span>
+        <div><p class="title">勾选文件，下载</p><p class="detail">文件保留分享中的目录结构。</p></div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="section column rise" style="animation-delay: 0.32s">
+    <h2>细节</h2>
+    <ul>
+      <li><p class="title">不触发限速</p><p class="detail">默认一个连接。超级会员可以在设置中调高。</p></li>
+      <li><p class="title">无服务器</p><p class="detail">凭据存在 macOS 钥匙串中，不经过第三方。</p></li>
+      <li><p class="title">开源</p><p class="detail">全部代码在 <a href="https://github.com/yiquncode/BaiduPCS-Swift">GitHub</a> 上。</p></li>
+    </ul>
+  </section>
+
+  <section class="section column rise" style="animation-delay: 0.40s">
+    <h2>问答</h2>
+    <dl>
+      <div><dt>能突破会员限速吗？</dt><dd>不能。Ferry 不绕过百度的会员限速。</dd></div>
+      <div><dt>为什么开发这个客户端？</dt><dd>我希望日常的网盘下载可以更轻、更简单，尽量减少安装体积和系统资源占用。同时，通过开放源代码，让应用的行为与数据处理方式更透明。</dd></div>
+    </dl>
+  </section>
+
+  <footer class="column">
+    <p>Ferry 与百度公司没有关联。“百度网盘”是百度公司的商标。</p>
+  </footer>
+
+</div>
+
+</main>
+</body>
+</html>
