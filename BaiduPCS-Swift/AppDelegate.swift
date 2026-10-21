@@ -6,6 +6,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
+        #if DEBUG
+        if DemoData.isEnabled, let appearance = DemoData.appearance { NSApp.appearance = appearance }
+        #endif
         Task { await model.start() }
     }
 

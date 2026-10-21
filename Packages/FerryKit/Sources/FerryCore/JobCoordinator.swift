@@ -200,6 +200,21 @@ public final class JobCoordinator {
         loadWarning = nil
     }
 
+    #if DEBUG
+    /// 截图用：代替 `start()`，显示给定的任务和文件下载状态。不读取也不保存任务列表，不交给引擎。
+    public func showDemo(jobs: [Job], downloads: [DownloadSnapshot]) {
+        guard !hasLoaded else { return }
+        hasLoaded = true
+        canSave = false
+        self.jobs = jobs
+        invalidateIndex()
+        for snapshot in downloads {
+            setSnapshot(snapshot.id, snapshot)
+        }
+        isStarted = true
+    }
+    #endif
+
     /// 应用退出前调用：停止下载，把已完成的文件下载记入任务，然后保存。
     public func shutdown() async {
         await engine.shutdown()

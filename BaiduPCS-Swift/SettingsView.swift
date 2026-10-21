@@ -5,18 +5,29 @@ import UniformTypeIdentifiers
 
 /// 设置窗口：下载、网盘、网络和账号四个标签页。
 struct SettingsView: View {
+    @State private var tab = 0
+
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
             DownloadSettingsView()
                 .tabItem { Label("下载", systemImage: "arrow.down.circle") }
+                .tag(0)
             NetdiskSettingsView()
                 .tabItem { Label("网盘", systemImage: "cloud") }
+                .tag(1)
             NetworkSettingsView()
                 .tabItem { Label("网络", systemImage: "network") }
+                .tag(2)
             AccountSettingsView()
                 .tabItem { Label("账号", systemImage: "person.crop.circle") }
+                .tag(3)
         }
         .frame(width: 480)
+        #if DEBUG
+        .onAppear {
+            if DemoData.isEnabled, let demoTab = DemoData.settingsTab { tab = demoTab }
+        }
+        #endif
     }
 }
 

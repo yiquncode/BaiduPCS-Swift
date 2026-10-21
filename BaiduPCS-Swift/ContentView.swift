@@ -11,6 +11,9 @@ struct ContentView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    #if DEBUG
+    @Environment(\.openSettings) private var openSettings
+    #endif
     @State private var window: NSWindow?
 
     private var showsWelcome: Bool { model.account == nil && model.coordinator.jobs.isEmpty }
@@ -35,6 +38,9 @@ struct ContentView: View {
         .onAppear {
             model.openMainWindow = { [openWindow] in openWindow(id: Self.windowID) }
             model.openLoginWindow = { [openWindow] in openWindow(id: LoginView.windowID) }
+            #if DEBUG
+            if DemoData.isEnabled, DemoData.settingsTab != nil { openSettings() }
+            #endif
         }
         .onChange(of: showsWelcome) { _, showsWelcome in
             guard !showsWelcome else { return }

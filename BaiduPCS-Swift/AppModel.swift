@@ -76,12 +76,23 @@ final class AppModel {
     }
 
     init() {
-        let settings = UserDefaults.standard.data(forKey: Self.settingsKey)
+        var settings = UserDefaults.standard.data(forKey: Self.settingsKey)
             .flatMap { try? JSONDecoder().decode(FerrySettings.self, from: $0) } ?? FerrySettings()
+        #if DEBUG
+        if DemoData.isEnabled { settings = FerrySettings() }
+        #endif
         let proxyPassword = ProxyPasswordStore.load()
         let proxy = ActiveProxy(settings.proxy, password: proxyPassword)
         let source = BaiduDownloadSource()
-        let engine = DownloadEngine(stateDirectory: FerryDirectories.downloadState, source: source,
+        var stateDirectory = FerryDirectories.downloadState
+        var jobsFile = FerryDirectories.jobsFile
+        #if DEBUG
+        if DemoData.isEnabled {
+            stateDirectory = DemoData.directory.appendingPathComponent("Downloads", isDirectory: true)
+            jobsFile = DemoData.directory.appendingPathComponent("jobs.json")
+        }
+        #endif
+        let engine = DownloadEngine(stateDirectory: stateDirectory, source: source,
                                     configuration: settings.downloadConfiguration(),
                                     sessionConfiguration: Self.applying(proxy, to: DownloadEngine.defaultSessionConfiguration()))
         self.settings = settings
@@ -90,10 +101,19 @@ final class AppModel {
         self.source = source
         self.engine = engine
         downloadDirectory = Self.defaultDownloadDirectory
-        coordinator = JobCoordinator(engine: engine, store: JobStore(fileURL: FerryDirectories.jobsFile),
+        coordinator = JobCoordinator(engine: engine, store: JobStore(fileURL: jobsFile),
                                      settings: settings, downloadFolder: DownloadFolder(url: Self.defaultDownloadDirectory))
         coordinator.onJobCompleted = { [weak self] job in self?.notifyCompletion(of: job) }
         resolveDownloadDirectory()
+        #if DEBUG
+        if DemoData.isEnabled {
+            if DemoData.isLoggedIn {
+                account = DemoData.account
+                coordinator.accountUK = DemoData.account.uk
+            }
+            return
+        }
+        #endif
         if let login = CredentialStore.load() {
             apply(makeClient(credential: login.credential), credential: login.credential, account: login.account)
         }
@@ -105,6 +125,13 @@ final class AppModel {
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
+        #if DEBUG
+        if DemoData.isEnabled {
+            let demo = DemoData.hasJobs ? DemoData.make() : (jobs: [], downloads: [])
+            coordinator.showDemo(jobs: demo.jobs, downloads: demo.downloads)
+            return
+        }
+        #endif
         await coordinator.start()
         // 启动时应用变为活跃的那次检测在任务列表加载前，被跳过，所以加载后再检测一次。
         if NSApp.isActive { await detectCopiedLink() }

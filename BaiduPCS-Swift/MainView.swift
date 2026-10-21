@@ -56,6 +56,9 @@ struct MainView: View {
                 }
         }
         .frame(minWidth: 640, minHeight: 400)
+        #if DEBUG
+        .task { await showDemoSelection() }
+        #endif
         .focusedSceneValue(\.jobSelection, JobSelection(jobs: selectedJobs, onRemove: requestRemoval))
         .confirmationDialog(
             pendingRemoval?.title ?? "",
@@ -97,6 +100,23 @@ struct MainView: View {
             model.remove(job, trashingFiles: removal == .trashingFiles)
         }
     }
+
+    #if DEBUG
+    /// 演示模式：按启动参数选中分类和任务。
+    private func showDemoSelection() async {
+        guard DemoData.isEnabled else { return }
+        while !model.coordinator.isStarted {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        if let value = DemoData.category.flatMap(JobCategory.init(rawValue:)) {
+            category = value
+        }
+        if let title = DemoData.selectedTitle, let job = model.coordinator.jobs.first(where: { $0.title == title }) {
+            selection = [job.id]
+            isInspectorPresented = true
+        }
+    }
+    #endif
 }
 
 /// 等待确认的移除：要移除的任务和怎样处理已下载的文件。

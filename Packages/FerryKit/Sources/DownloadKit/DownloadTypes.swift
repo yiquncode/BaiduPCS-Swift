@@ -126,6 +126,14 @@ public struct DownloadSnapshot: Sendable, Hashable {
     public var totalBytes: Int64?
     public var receivedBytes: Int64
     public var bytesPerSecond: Double
+
+    public init(id: String, state: DownloadState, totalBytes: Int64?, receivedBytes: Int64, bytesPerSecond: Double) {
+        self.id = id
+        self.state = state
+        self.totalBytes = totalBytes
+        self.receivedBytes = receivedBytes
+        self.bytesPerSecond = bytesPerSecond
+    }
 }
 
 public enum DownloadEvent: Sendable, Hashable {
