@@ -27,6 +27,9 @@ final class FileNode<Entry: FileTreeEntry>: Identifiable {
         self.entry = entry
     }
 
+    /// 绕过编译器崩溃：Swift 6.3 用 `-O` 编译默认 MainActor 隔离的泛型类的隐式 deinit 时崩溃。
+    nonisolated deinit {}
+
     var id: Entry.ID? { entry?.id }
     var isDirectory: Bool { entry?.isDirectory ?? true }
 
@@ -72,6 +75,9 @@ final class FileTree<Entry: FileTreeEntry> {
         self.list = list
         self.onError = onError
     }
+
+    /// 见 `FileNode` 的 deinit。
+    nonisolated deinit {}
 
     func load(_ node: FileNode<Entry>) async {
         let isFirstLoad = node.children == nil
