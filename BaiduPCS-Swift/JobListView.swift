@@ -24,11 +24,7 @@ struct JobListView: View {
                     Button("登录…") { model.presentLogin() }
                 }
             } else if model.coordinator.jobs.isEmpty {
-                ContentUnavailableView {
-                    Label("没有任务", systemImage: "tray.and.arrow.down")
-                } actions: {
-                    Button("添加链接…") { model.presentAddLink() }
-                }
+                ContentUnavailableView("没有任务", systemImage: "tray.and.arrow.down")
             } else if !searchText.isEmpty {
                 ContentUnavailableView.search(text: searchText)
             } else {
