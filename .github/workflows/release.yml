@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Read release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            /^## / { if (found) exit; found = (index($0, "## " v " ") == 1 || $0 == "## " v); next }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          xcodebuild -version
+          xcodebuild -project BaiduPCS-Swift.xcodeproj -scheme BaiduPCS-Swift \
+            -configuration Release -destination 'generic/platform=macOS' \
+            -derivedDataPath build \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+            build
+
+      - name: Sign
+        env:
+          SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+          # SHA-1 of the self-signed "Ferry" certificate. Every release must use it,
+          # or macOS treats the update as another app (Keychain, sandbox container, bookmarks).
+          SIGNING_CERT_SHA1: 01A034E1B7B90176CCC0E6D7C19F645E352DECE8
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password=$(openssl rand -hex 16)
+          echo "$SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$SIGNING_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/signing.p12"
+
+          ditto build/Build/Products/Release/BaiduPCS-Swift.app Ferry.app
+          codesign -d --entitlements - --xml Ferry.app > "$RUNNER_TEMP/entitlements.plist"
+          codesign --force --options runtime --timestamp=none \
+            --entitlements "$RUNNER_TEMP/entitlements.plist" -s "$SIGNING_CERT_SHA1" Ferry.app
+          codesign --verify --strict Ferry.app
+          codesign -d -r- Ferry.app 2>&1 | tee "$RUNNER_TEMP/requirement.txt"
+          grep -qi "certificate leaf = H\"$SIGNING_CERT_SHA1\"" "$RUNNER_TEMP/requirement.txt"
+
+      - name: Package
+        run: |
+          ditto -c -k --keepParent Ferry.app "Ferry-$VERSION.zip"
+          shasum -a 256 "Ferry-$VERSION.zip" | tee "Ferry-$VERSION.zip.sha256"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" "Ferry-$VERSION.zip" "Ferry-$VERSION.zip.sha256" \
+            --title "Ferry $VERSION" --notes-file notes.md $prerelease

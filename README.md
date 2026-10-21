@@ -19,6 +19,12 @@ Ferry 是 Swift 编写的 macOS 原生百度网盘下载工具。它把分享链
 - macOS 14 或更高版本
 - 构建需要 Xcode 26（Swift 6.2）
 
+## 安装
+
+从 [Releases](https://github.com/yiquncode/BaiduPCS-Swift/releases/latest) 下载 `Ferry-<版本>.zip`，解压后把 Ferry 拖到“应用程序”文件夹。
+
+Ferry 没有经过 Apple 公证。第一次打开时，macOS 不让它运行。打开“系统设置 → 隐私与安全性”，在“安全性”中点击“仍要打开”。
+
 ## 开发
 
 要用自己的开发团队签名，在 `Config/Local.xcconfig` 中设置 `DEVELOPMENT_TEAM`。这个文件是可选的，不提交到仓库。
