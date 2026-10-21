@@ -19,36 +19,11 @@ Ferry 是 Swift 编写的 macOS 原生百度网盘下载工具。它把分享链
 - macOS 14 或更高版本
 - 构建需要 Xcode 26（Swift 6.2）
 
-## 构建
+## 开发
 
-```sh
-git clone <仓库地址>
-cd BaiduPCS-Swift
-open BaiduPCS-Swift.xcodeproj
-```
+要用自己的开发团队签名，在 `Config/Local.xcconfig` 中设置 `DEVELOPMENT_TEAM`。这个文件是可选的，不提交到仓库。
 
-在 Xcode 中选择 `BaiduPCS-Swift` scheme，然后运行。
-
-要用自己的开发团队签名，在 `Config/` 中新建 `Local.xcconfig`：
-
-```
-DEVELOPMENT_TEAM = <你的 Apple 开发团队 ID>
-```
-
-这个文件不提交到仓库。没有这个文件时，工程也能构建。
-
-## 测试
-
-协议和下载逻辑在本地 Swift Package `Packages/FerryKit` 中，可以不打开 Xcode 测试：
-
-```sh
-cd Packages/FerryKit
-swift test
-```
-
-测试使用桩服务器和假网盘，不访问百度。
-
-`LiveSmokeTests` 用真实账号做只读检查（校验登录、打开分享、列目录），不转存、不删除。设置以下两个环境变量后才运行：
+`Packages/FerryKit` 中的 `LiveSmokeTests` 用真实账号做只读检查，设置以下环境变量后才运行：
 
 ```sh
 FERRY_LIVE_COOKIE_FILE=~/cookie.txt \
