@@ -81,6 +81,81 @@ extension StubbedNetworkTests {
             #expect(Stub.shared.requests.count == 2)
         }
 
+        @Test func listDirectoryParsesFilesAndDirectories() async throws {
+            let client = Fixture.client { _ in
+                .json("""
+                {"errno":0,"list":[
+                  {"fs_id":1,"server_filename":"报告","path":"/资料/报告","isdir":1,"size":0,"server_mtime":1700000000},
+                  {"fs_id":2,"server_filename":"a b.zip","path":"/资料/a b.zip","isdir":0,"size":"4096","server_mtime":"1700000100"},
+                  {"fs_id":3,"path":"/资料/no-name.txt","isdir":0,"size":7},
+                  {"fs_id":4,"server_filename":"no-path"}
+                ]}
+                """)
+            }
+            let entries = try await client.listDirectory("/资料")
+            #expect(entries == [
+                NetdiskEntry(fsID: 1, name: "报告", path: "/资料/报告", isDirectory: true, size: 0,
+                             modifiedAt: Date(timeIntervalSince1970: 1_700_000_000)),
+                NetdiskEntry(fsID: 2, name: "a b.zip", path: "/资料/a b.zip", isDirectory: false, size: 4096,
+                             modifiedAt: Date(timeIntervalSince1970: 1_700_000_100)),
+                NetdiskEntry(fsID: 3, name: "no-name.txt", path: "/资料/no-name.txt", isDirectory: false, size: 7),
+            ])
+
+            let request = try #require(Stub.shared.requests.first)
+            #expect(Stub.shared.requests.count == 1)
+            #expect(request.method == "GET")
+            #expect(request.url.host() == "pan.baidu.com")
+            #expect(request.path == "/api/list")
+            #expect(request.header("User-Agent") == UserAgent.netdisk)
+            #expect(request.cookies["BDUSS"] == "test_bduss")
+            #expect(request.query == ["dir": "/资料", "order": "name", "desc": "0", "clienttype": "0", "num": "1000", "page": "1"])
+        }
+
+        @Test func listDirectoryPagesOneLevel() async throws {
+            let client = Fixture.client { request in
+                switch request.query["page"] {
+                case "1":
+                    var items = (1...999).map { (fsID: Int64($0), name: "f\($0)", path: "/d/f\($0)", isDir: false, size: Int64($0)) }
+                    items.append((5000, "sub", "/d/sub", true, 0))
+                    return .json(Fixture.listJSON(items))
+                case "2":
+                    return .json(Fixture.listJSON([(1000, "last", "/d/last", false, 7)]))
+                default:
+                    return .json(#"{"errno":0,"list":[]}"#)
+                }
+            }
+            let entries = try await client.listDirectory("/d")
+            #expect(entries.count == 1001)
+            #expect(entries.last == NetdiskEntry(fsID: 1000, name: "last", path: "/d/last", isDirectory: false, size: 7))
+            #expect(entries.contains(NetdiskEntry(fsID: 5000, name: "sub", path: "/d/sub", isDirectory: true, size: 0)))
+
+            let requests = Stub.shared.requests
+            #expect(requests.map { $0.query["page"] } == ["1", "2"])
+            #expect(requests.allSatisfy { $0.query["dir"] == "/d" })
+        }
+
+        @Test func listDirectoryStopsOnRepeatedEntries() async throws {
+            let client = Fixture.client { _ in
+                .json(Fixture.listJSON((1...1000).map { (Int64($0), "f\($0)", "/d/f\($0)", false, 1) }))
+            }
+            let entries = try await client.listDirectory("/d")
+            #expect(entries.count == 1000)
+            #expect(Stub.shared.requests.count == 2)
+        }
+
+        @Test(arguments: [
+            (StubResponse.json(#"{"errno":-9}"#), BaiduError.fileNotFound),
+            (.json(#"{"errno":-6}"#), .loginExpired),
+            (.json(#"{"errno":-7}"#), .invalidNameOrAccessDenied),
+            (.json(#"{"errno":31023,"errmsg":"param error"}"#), .server(code: 31023, message: "param error")),
+            (StubResponse(status: 502, body: Data("Bad Gateway".utf8)), .httpStatus(502)),
+            (.html("<html>login</html>"), .invalidResponse),
+        ])
+        func listDirectoryMapsErrors(_ response: StubResponse, _ error: BaiduError) async {
+            let client = Fixture.client { _ in response }
+            await #expect(throws: error) { try await client.listDirectory("/gone") }
+        }
+
         @Test func deleteSendsMultipartPathList() async throws {
             let client = Fixture.client { _ in .json(#"{"request_id":1}"#) }
             try await client.delete(paths: ["/Ferry/job", "/Ferry/a b"])

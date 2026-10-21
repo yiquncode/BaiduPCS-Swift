@@ -75,6 +75,30 @@ public struct ShareEntry: Sendable, Hashable, Codable, Identifiable {
     }
 }
 
+/// 自己网盘中的一个文件或目录。
+public struct NetdiskEntry: Sendable, Hashable, Codable, Identifiable {
+    public var fsID: Int64
+    public var name: String
+    /// 条目在网盘中的绝对路径。列子目录时作为 `dir` 参数。
+    public var path: String
+    public var isDirectory: Bool
+    /// 字节数。目录为 0。
+    public var size: Int64
+    /// 服务端记录的修改时间（`server_mtime`）。响应中没有时为 `nil`。
+    public var modifiedAt: Date?
+
+    public var id: Int64 { fsID }
+
+    public init(fsID: Int64, name: String, path: String, isDirectory: Bool, size: Int64, modifiedAt: Date? = nil) {
+        self.fsID = fsID
+        self.name = name
+        self.path = path
+        self.isDirectory = isDirectory
+        self.size = size
+        self.modifiedAt = modifiedAt
+    }
+}
+
 /// 自己网盘中的一个文件。
 public struct RemoteFile: Sendable, Hashable, Codable {
     public var path: String

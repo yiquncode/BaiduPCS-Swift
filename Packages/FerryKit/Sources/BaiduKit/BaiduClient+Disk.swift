@@ -17,6 +17,12 @@ extension BaiduClient {
 
     private static let listPageSize = 1000
 
+    /// 列出目录下的一层文件和目录。
+    public func listDirectory(_ path: String) async throws -> [NetdiskEntry] {
+        var seen = Set<Int64>()
+        return try await listPages(path, seen: &seen)
+    }
+
     /// 递归列出目录下的全部文件（不含目录）。
     public func listFilesRecursively(_ path: String) async throws -> [RemoteFile] {
         var files: [RemoteFile] = []
@@ -24,31 +30,43 @@ extension BaiduClient {
         var seen = Set<Int64>()
 
         while !directories.isEmpty {
-            let directory = directories.removeFirst()
-            var page = 1
-            while true {
-                let url = URLEncoding.url("\(Host.pan)/api/list", [
-                    ("dir", directory), ("order", "name"), ("desc", "0"), ("clienttype", "0"),
-                    ("num", String(Self.listPageSize)), ("page", String(page)),
-                ])
-                let json = try await panJSON(BaiduRequest(url: url, endpoint: .fileList, cookies: cookies()))
-                let list = json["list"].array
-                var repeated = false
-                for item in list {
-                    guard let fsID = item["fs_id"].int64, let itemPath = item["path"].string else { continue }
-                    // 服务端忽略分页参数时会重复返回同一页，出现已见过的条目就停止。
-                    guard seen.insert(fsID).inserted else { repeated = true; continue }
-                    if item["isdir"].bool ?? false {
-                        directories.append(itemPath)
-                    } else {
-                        files.append(RemoteFile(path: itemPath, size: item["size"].int64 ?? 0, fsID: fsID))
-                    }
+            for entry in try await listPages(directories.removeFirst(), seen: &seen) {
+                if entry.isDirectory {
+                    directories.append(entry.path)
+                } else {
+                    files.append(RemoteFile(path: entry.path, size: entry.size, fsID: entry.fsID))
                 }
-                if list.count < Self.listPageSize || repeated { break }
-                page += 1
             }
         }
         return files
+    }
+
+    /// 翻页列出一个目录，直到本页不足一页或出现 `seen` 中的条目。
+    private func listPages(_ directory: String, seen: inout Set<Int64>) async throws -> [NetdiskEntry] {
+        var entries: [NetdiskEntry] = []
+        var page = 1
+        while true {
+            let url = URLEncoding.url("\(Host.pan)/api/list", [
+                ("dir", directory), ("order", "name"), ("desc", "0"), ("clienttype", "0"),
+                ("num", String(Self.listPageSize)), ("page", String(page)),
+            ])
+            let json = try await panJSON(BaiduRequest(url: url, endpoint: .fileList, cookies: cookies()))
+            let list = json["list"].array
+            var repeated = false
+            for item in list {
+                guard let fsID = item["fs_id"].int64, let path = item["path"].string else { continue }
+                // 服务端忽略分页参数时会重复返回同一页，出现已见过的条目就停止。
+                guard seen.insert(fsID).inserted else { repeated = true; continue }
+                let isDirectory = item["isdir"].bool ?? false
+                entries.append(NetdiskEntry(
+                    fsID: fsID, name: item["server_filename"].string ?? Path.lastComponent(path), path: path,
+                    isDirectory: isDirectory, size: isDirectory ? 0 : item["size"].int64 ?? 0,
+                    modifiedAt: item["server_mtime"].int64.map { Date(timeIntervalSince1970: TimeInterval($0)) }))
+            }
+            if list.count < Self.listPageSize || repeated { break }
+            page += 1
+        }
+        return entries
     }
 
     /// 删除文件或目录，删除的内容进入回收站。路径不存在时视为成功。
