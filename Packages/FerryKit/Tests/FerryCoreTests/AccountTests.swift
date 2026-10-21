@@ -14,8 +14,10 @@ import Testing
         let entries = fixture.netdisk.rootEntries()
         let first = coordinator.addJob(session: FakeNetdisk.session, entries: [entries[0]])
         let second = coordinator.addJob(session: FakeNetdisk.session, entries: [entries[1]])
+        // 第一个任务已经取得下载链接。换账号后，它用这个链接下载完。
         try await waitUntil("downloading") {
             coordinator.job(first.id)?.phase == .downloading && coordinator.job(second.id)?.phase == .downloading
+                && coordinator.job(first.id)?.files.first.map { fixture.server.requests(for: $0.remotePath) > 0 } == true
         }
         #expect(coordinator.job(first.id)?.accountUK == Fixture.accountUK)
 
@@ -50,5 +52,25 @@ import Testing
         coordinator.accountUK = Fixture.accountUK
         await coordinator.retry(job.id)
         try await coordinator.waitForPhase(.completed, of: job.id)
+    }
+
+    /// 文件下载加入引擎前换了账号：不为它获取下载链接，文件下载直接失败。换回原来的账号后重试，正常下载。
+    @Test func otherAccountGetsNoDownloadLink() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10_000)])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        coordinator.willEnqueue = { _ in coordinator.accountUK = 2 }
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        try await coordinator.waitForPhase(.failed(.download), of: job.id)
+
+        let file = try #require(coordinator.job(job.id)?.files.first)
+        #expect(coordinator.job(job.id)?.error == DownloadFailure.resolveFailed(CoordinatorError.otherAccount.errorDescription!).message)
+        #expect(fixture.server.resolves(for: file.remotePath) == 0)
+
+        coordinator.willEnqueue = nil
+        coordinator.accountUK = Fixture.accountUK
+        await coordinator.retry(job.id)
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        #expect(fixture.contents("a.bin") == fixture.netdisk.data(at: file.remotePath))
     }
 }

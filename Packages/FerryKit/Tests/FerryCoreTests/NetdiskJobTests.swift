@@ -170,6 +170,30 @@ import Testing
         #expect(fixture.netdisk.operations == [.list("/资料/2024/报告")])
     }
 
+    /// 另一个账号的网盘中可能有同一路径的文件。换账号后不为这个任务获取下载链接，否则会下载到那个账号的文件。
+    /// 换回原来的账号后重试，正常下载。
+    @Test func otherAccountGetsNoDownloadLink() async throws {
+        let disk = ["/视频/家庭录像/a.mov": randomData(10_000)]
+        let fixture = Fixture(disk: disk)
+        let coordinator = fixture.makeCoordinator(settings: cleanup)
+        await coordinator.start()
+        // 桩服务器对任何账号都提供这个路径的文件，就像另一个账号的网盘中也有它。
+        coordinator.willEnqueue = { _ in coordinator.accountUK = Fixture.accountUK + 1 }
+        let job = coordinator.addNetdiskJob(entries: [entry("/视频/家庭录像/a.mov", directory: false, in: disk)])
+        try await coordinator.waitForPhase(.failed(.download), of: job.id)
+
+        #expect(coordinator.job(job.id)?.error == DownloadFailure.resolveFailed(CoordinatorError.otherAccount.errorDescription!).message)
+        #expect(fixture.server.resolves(for: "/视频/家庭录像/a.mov") == 0)
+        #expect(fixture.server.requests(for: "/视频/家庭录像/a.mov") == 0)
+
+        coordinator.willEnqueue = nil
+        coordinator.accountUK = Fixture.accountUK
+        await coordinator.retry(job.id)
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        #expect(fixture.contents("a.mov") == disk["/视频/家庭录像/a.mov"])
+        #expect(fixture.netdisk.deletes.isEmpty)
+    }
+
     @Test func failsWhenListedFileIsOutsideCheckedFolder() async throws {
         let fixture = Fixture(disk: disk)
         let coordinator = fixture.makeCoordinator(settings: cleanup)

@@ -745,6 +745,12 @@ public final class JobCoordinator {
         return owner != accountUK
     }
 
+    /// `AccountCheckedSource` 获取下载链接前后调用。文件下载属于另一个账号的任务时抛出错误，引擎不再重试。
+    func checkAccount(ofDownload id: String) throws {
+        guard let (jobIndex, _) = locate(id), belongsToOtherAccount(jobs[jobIndex]) else { return }
+        throw CoordinatorError.otherAccount
+    }
+
     // MARK: - 下载目录
 
     /// 任务下载目录的当前位置。第一次调用时取得访问权限，直到任务完成或移除。
@@ -1032,7 +1038,8 @@ enum TransferCheckError: LocalizedError {
     }
 }
 
-enum CoordinatorError: LocalizedError {
+/// 遵循 `PermanentDownloadSourceError`：从 `AccountCheckedSource` 抛出时，引擎不再重试。
+enum CoordinatorError: LocalizedError, PermanentDownloadSourceError {
     case notLoggedIn
     case otherAccount
 

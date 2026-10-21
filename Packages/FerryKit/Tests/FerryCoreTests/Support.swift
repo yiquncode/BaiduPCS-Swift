@@ -166,8 +166,13 @@ final class FileServer: Sendable {
         FileProtocol.register(self, host: host)
     }
 
+    private let resolveLog = OSAllocatedUnfairLock<[String]>(initialState: [])
+
     var log: [String] { state.withLock { $0.log } }
     func requests(for path: String) -> Int { log.count { $0 == path } }
+    /// `FileServerSource` 为这个网盘路径获取下载链接的次数。
+    func resolves(for path: String) -> Int { resolveLog.withLock { $0.count { $0 == path } } }
+    func recordResolve(_ path: String) { resolveLog.withLock { $0.append(path) } }
     /// 停住所有响应，直到设为 false 或请求被取消。
     func setStalled(_ stalled: Bool) { state.withLock { $0.stalled = stalled } }
     /// 只停住以这些后缀结尾的路径。
@@ -267,7 +272,9 @@ struct FileServerSource: DownloadSource {
     let server: FileServer
 
     func resolve(_ request: DownloadRequest) async throws -> ResolvedURL {
-        ResolvedURL(url: server.url(for: BaiduDownloadSource.remotePath(from: request.context)))
+        let path = BaiduDownloadSource.remotePath(from: request.context)
+        server.recordResolve(path)
+        return ResolvedURL(url: server.url(for: path))
     }
 }
 
@@ -327,17 +334,20 @@ final class Fixture {
         checkpointInterval: .milliseconds(20)
     )
 
-    func makeEngine() -> DownloadEngine {
-        DownloadEngine(stateDirectory: stateDirectory, source: FileServerSource(server: server),
+    func makeEngine(source: (any DownloadSource)? = nil) -> DownloadEngine {
+        DownloadEngine(stateDirectory: stateDirectory, source: source ?? FileServerSource(server: server),
                        configuration: Self.configuration, session: session)
     }
 
     func makeCoordinator(settings: FerrySettings = FerrySettings(cleanupAfterDownload: false, maxConcurrentFiles: 4), downloadFolder: URL? = nil,
                          folderAccess: any DownloadFolderAccess = SecurityScopedFolderAccess()) -> JobCoordinator {
-        let coordinator = JobCoordinator(engine: makeEngine(), store: store, settings: settings,
+        // 和应用一样，获取链接前检查账号。
+        let source = AccountCheckedSource(FileServerSource(server: server))
+        let coordinator = JobCoordinator(engine: makeEngine(source: source), store: store, settings: settings,
                                          downloadFolder: DownloadFolder(url: downloadFolder ?? downloads),
                                          folderAccess: folderAccess, trashItem: Self.trashItem(into: trash),
                                          baseConfiguration: Self.configuration)
+        source.connect(coordinator)
         coordinator.netdisk = netdisk
         coordinator.accountUK = Self.accountUK
         // 每个测试的每个事件都检查增量维护的计数。

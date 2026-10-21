@@ -93,7 +93,8 @@ final class AppModel {
             jobsFile = DemoData.directory.appendingPathComponent("jobs.json")
         }
         #endif
-        let engine = DownloadEngine(stateDirectory: stateDirectory, source: source,
+        let checkedSource = AccountCheckedSource(source)
+        let engine = DownloadEngine(stateDirectory: stateDirectory, source: checkedSource,
                                     configuration: settings.downloadConfiguration(),
                                     sessionConfiguration: Self.applying(proxy, to: DownloadEngine.defaultSessionConfiguration()))
         self.settings = settings
@@ -104,6 +105,7 @@ final class AppModel {
         downloadDirectory = Self.defaultDownloadDirectory
         coordinator = JobCoordinator(engine: engine, store: JobStore(fileURL: jobsFile),
                                      settings: settings, downloadFolder: DownloadFolder(url: Self.defaultDownloadDirectory))
+        checkedSource.connect(coordinator)
         coordinator.onJobCompleted = { [weak self] job in self?.notifyCompletion(of: job) }
         resolveDownloadDirectory()
         #if DEBUG
