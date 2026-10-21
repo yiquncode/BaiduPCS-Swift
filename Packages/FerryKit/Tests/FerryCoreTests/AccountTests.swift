@@ -54,6 +54,19 @@ import Testing
         try await coordinator.waitForPhase(.completed, of: job.id)
     }
 
+    /// 旧版本创建的分享任务没有记录账号。重试时记为当前账号：任务子目录由转存创建，不是用户自己的文件。
+    @Test func oldShareJobAdoptsCurrentAccount() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10)])
+        let saved = Job(link: FakeNetdisk.link, password: nil, entries: fixture.netdisk.rootEntries(), transferFolder: "/Ferry")
+        try fixture.store.save([saved])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+
+        await coordinator.retry(saved.id)
+        try await coordinator.waitForPhase(.completed, of: saved.id)
+        #expect(coordinator.job(saved.id)?.accountUK == Fixture.accountUK)
+    }
+
     /// 文件下载加入引擎前换了账号：不为它获取下载链接，文件下载直接失败。换回原来的账号后重试，正常下载。
     @Test func otherAccountGetsNoDownloadLink() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(10_000)])

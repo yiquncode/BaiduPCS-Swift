@@ -4,11 +4,14 @@ import SwiftUI
 
 /// 从我的网盘下载：在网盘的文件树中勾选文件或目录，然后下载。打开时不勾选任何条目。
 ///
-/// “重新加载”换一棵新的文件树，从根目录重新读取，勾选清空。
+/// “重新加载”换一棵新的文件树，从根目录重新读取，勾选清空。登录的账号变化时（设置窗口中可以退出登录再登录）也这样：
+/// 文件树中的条目是原来账号的网盘中的路径。
 struct NetdiskDownloadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var tree: FileTree<NetdiskEntry>?
+    /// 文件树所属账号的 uk。新任务记录这个账号。
+    @State private var treeAccountUK: Int64?
     /// 每次重新加载加一。它变化时 `.task` 取消上一次读取，重新读取。
     @State private var generation = 0
     /// 没有文件树的原因，例如未登录。
@@ -31,6 +34,7 @@ struct NetdiskDownloadView: View {
         }
         .frame(minWidth: 600, idealWidth: 640, minHeight: 460, idealHeight: 540)
         .task(id: generation) { await load() }
+        .onChange(of: model.account?.uk) { generation += 1 }
     }
 
     private var header: some View {
@@ -82,14 +86,16 @@ struct NetdiskDownloadView: View {
     }
 
     private func load() async {
-        guard let list = listDirectory() else {
+        guard let accountUK = model.account?.uk, let list = listDirectory() else {
             tree = nil
+            treeAccountUK = nil
             errorMessage = "未登录百度网盘。"
             return
         }
         errorMessage = nil
         let tree = FileTree<NetdiskEntry>(initialSelection: .none, list: list) { model.noteError($0) }
         self.tree = tree
+        treeAccountUK = accountUK
         await tree.load(tree.root)
     }
 
@@ -104,10 +110,12 @@ struct NetdiskDownloadView: View {
         return { try await client.listDirectory($0?.path ?? "/") }
     }
 
+    /// 文件树不属于当前账号时什么也不做。账号变化后文件树马上重新加载，所以只有在两者之间按下才会这样。
     private func download() {
-        guard let tree, !tree.selection.isEmpty, !isSubmitting else { return }
+        guard let tree, !tree.selection.isEmpty, !isSubmitting,
+              let accountUK = treeAccountUK, accountUK == model.account?.uk else { return }
         isSubmitting = true
-        model.addNetdiskJob(entries: tree.selectedEntries, downloadFolder: selectedFolder)
+        model.addNetdiskJob(entries: tree.selectedEntries, accountUK: accountUK, downloadFolder: selectedFolder)
         dismiss()
     }
 }

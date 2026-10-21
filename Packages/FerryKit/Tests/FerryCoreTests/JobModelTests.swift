@@ -183,6 +183,23 @@ import Testing
         #expect(job.phase == .failed(.transfer))
     }
 
+    /// 只有最后一级是任务短 ID 的规范路径才是任务子目录。转存目录改过时，旧任务的子目录仍然有效。
+    @Test func jobDirectoryEndsWithShortID() throws {
+        let id = UUID(uuidString: "ABCDEF12-0000-0000-0000-000000000000")!
+        let job = Job(link: link, password: nil, entries: [entry("a.zip")], transferFolder: "/Ferry", id: id)
+        func decoded(remoteDirectory: String) throws -> Job {
+            var object = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(job)) as? [String: Any])
+            object["remoteDirectory"] = remoteDirectory
+            return try JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        #expect(job.hasJobDirectory)
+        #expect(try decoded(remoteDirectory: "/旧目录/ABCDEF12").hasJobDirectory)
+        #expect(try decoded(remoteDirectory: "/ABCDEF12").hasJobDirectory)
+        for invalid in ["", "/", "/我的资料", "/Ferry", "/Ferry/ABCDEF13", "/Ferry/abcdef12", "/Ferry/ABCDEF12/", "Ferry/ABCDEF12", "//ABCDEF12"] {
+            #expect(try !decoded(remoteDirectory: invalid).hasJobDirectory, "\(invalid)")
+        }
+    }
+
     @Test func parentOfRemotePath() {
         #expect(RemotePath.parent(of: "/资料/2024/报告") == "/资料/2024")
         #expect(RemotePath.parent(of: "/a") == "/")

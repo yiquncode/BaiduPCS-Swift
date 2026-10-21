@@ -433,9 +433,9 @@ final class AppModel {
         requestNotificationAuthorization()
     }
 
-    /// `downloadFolder` 为 nil 时，任务使用设置中的下载目录。
-    func addNetdiskJob(entries: [NetdiskEntry], downloadFolder: DownloadFolder? = nil) {
-        coordinator.addNetdiskJob(entries: entries, downloadFolder: downloadFolder)
+    /// `accountUK` 是勾选的条目所在网盘的账号。`downloadFolder` 为 nil 时，任务使用设置中的下载目录。
+    func addNetdiskJob(entries: [NetdiskEntry], accountUK: Int64, downloadFolder: DownloadFolder? = nil) {
+        coordinator.addNetdiskJob(entries: entries, accountUK: accountUK, downloadFolder: downloadFolder)
         requestNotificationAuthorization()
     }
 

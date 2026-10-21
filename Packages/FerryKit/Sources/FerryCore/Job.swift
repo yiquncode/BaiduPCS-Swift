@@ -102,8 +102,12 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// 网盘中有这个任务的子目录：分享任务转存到它，清理时删除它。网盘任务没有，所以 Ferry 不对它调用 `Netdisk.delete`。
+    ///
+    /// Ferry 写入的任务子目录一定是规范的路径，最后一级是任务的短 ID（见 `init(link:password:entries:transferFolder:id:createdAt:)`）。
+    /// 任务列表中的值不是这样时（例如 `/` 或 `/我的资料`），按没有任务子目录处理：这个路径可能是用户自己的目录。
     public var hasJobDirectory: Bool {
-        if case .share = source { !remoteDirectory.isEmpty } else { false }
+        guard case .share = source, remoteDirectory == RemotePath.normalized(remoteDirectory) else { return false }
+        return RemotePath.components(of: remoteDirectory, omittingEmpty: true).last == Self.shortID(id)
     }
 
     /// 任务列表中 `source` 键的值。没有这个键时（旧版本保存的任务）是分享任务。

@@ -140,7 +140,7 @@ public final class JobCoordinator {
         }
         for index in loaded.indices where loaded[index].phase == .transferring {
             loaded[index].phase = .failed(.transfer)
-            loaded[index].error = loaded[index].hasJobDirectory ? "应用退出时转存没有完成。" : "应用退出时准备没有完成。"
+            loaded[index].error = loaded[index].link != nil ? "应用退出时转存没有完成。" : "应用退出时准备没有完成。"
         }
         // 启动完成前添加的任务排在前面。
         jobs += loaded
@@ -251,9 +251,11 @@ public final class JobCoordinator {
     }
 
     /// 创建网盘任务并开始准备：列出勾选的目录，然后直接下载。不转存，也不修改网盘中的文件。
-    /// - Parameter downloadFolder: 用户为这个任务选择的下载目录。nil 时使用 `self.downloadFolder`（设置中的下载目录）。
+    /// - Parameters:
+    ///   - accountUK: 勾选的条目所在的网盘的账号。它不是当前账号时，任务按另一个账号的任务处理，不列出也不下载。
+    ///   - downloadFolder: 用户为这个任务选择的下载目录。nil 时使用 `self.downloadFolder`（设置中的下载目录）。
     @discardableResult
-    public func addNetdiskJob(entries: [NetdiskEntry], downloadFolder: DownloadFolder? = nil) -> Job {
+    public func addNetdiskJob(entries: [NetdiskEntry], accountUK: Int64, downloadFolder: DownloadFolder? = nil) -> Job {
         var job = Job(netdiskEntries: entries)
         job.downloadFolder = downloadFolder ?? self.downloadFolder
         job.accountUK = accountUK
@@ -385,6 +387,8 @@ public final class JobCoordinator {
             guard let netdisk else { throw CoordinatorError.notLoggedIn }
             guard !belongsToOtherAccount(job) else { throw CoordinatorError.otherAccount }
             if job.accountUK == nil {
+                // 网盘任务的条目只在创建它的账号的网盘中有意义，不能认为它属于当前账号。
+                guard job.link != nil else { throw CoordinatorError.unknownAccount }
                 update(id) { $0.accountUK = accountUK }
             }
             let files: [JobFile]
@@ -449,12 +453,12 @@ public final class JobCoordinator {
         var listed: [(file: RemoteFile, entry: NetdiskEntry)] = []
         for entry in entries {
             try Task.checkCancellation()
+            // 根目录（`/` 或空路径）会列出整个网盘。只有手动修改的任务列表中才有这样的条目。
+            guard RemotePath.normalized(entry.path) != "/" else { throw TransferCheckError.unsafePath(entry.name) }
             guard entry.isDirectory else {
                 listed.append((RemoteFile(path: entry.path, size: entry.size, fsID: entry.fsID), entry))
                 continue
             }
-            // 空路径会被当作根目录，列出整个网盘。
-            guard !entry.path.isEmpty else { throw TransferCheckError.unsafePath(entry.name) }
             for file in try await netdisk.listFilesRecursively(entry.path) {
                 listed.append((file, entry))
             }
@@ -747,8 +751,11 @@ public final class JobCoordinator {
 
     /// `AccountCheckedSource` 获取下载链接前后调用。文件下载属于另一个账号的任务时抛出错误，引擎不再重试。
     func checkAccount(ofDownload id: String) throws {
-        guard let (jobIndex, _) = locate(id), belongsToOtherAccount(jobs[jobIndex]) else { return }
-        throw CoordinatorError.otherAccount
+        guard let (jobIndex, _) = locate(id) else { return }
+        let job = jobs[jobIndex]
+        if belongsToOtherAccount(job) { throw CoordinatorError.otherAccount }
+        // 和 `transfer` 相同：没有记录账号的网盘任务不能认为属于当前账号。
+        if job.accountUK == nil, job.link == nil { throw CoordinatorError.unknownAccount }
     }
 
     // MARK: - 下载目录
@@ -1027,7 +1034,7 @@ enum TransferCheckError: LocalizedError {
         case .noFiles:
             "转存后网盘中没有找到文件，可能转存尚未完成，请重试。"
         case .missingJobDirectory:
-            "任务记录中没有任务子目录，无法转存。"
+            "任务记录中没有有效的任务子目录，无法转存。"
         case .outsideJobDirectory(let path):
             "转存后的文件“\(path)”不在任务子目录中，无法确定保存位置。"
         case .outsideCheckedEntry(let path):
@@ -1042,11 +1049,14 @@ enum TransferCheckError: LocalizedError {
 enum CoordinatorError: LocalizedError, PermanentDownloadSourceError {
     case notLoggedIn
     case otherAccount
+    /// 网盘任务没有记录账号（只有手动修改的任务列表才会这样）。
+    case unknownAccount
 
     var errorDescription: String? {
         switch self {
         case .notLoggedIn: "未登录百度网盘。"
         case .otherAccount: "这个任务是用另一个百度账号创建的。请登录那个账号后再操作。"
+        case .unknownAccount: "任务中没有记录百度账号，不能确定文件在哪个账号的网盘中。请重新添加这个任务。"
         }
     }
 }

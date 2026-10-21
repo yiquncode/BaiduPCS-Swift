@@ -447,4 +447,77 @@ import Testing
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
         #expect(coordinator.job(job.id)?.error == "未登录百度网盘。")
     }
+
+    // MARK: - 任务列表中无效的任务子目录
+
+    /// 任务列表中的 `remoteDirectory` 可能被改成用户自己的目录。这些路径不是任务子目录，Ferry 不删除它们，也不转存到那里。
+    private static let invalidJobDirectories = ["/", "/我的资料", ""]
+
+    /// 从任务列表读出的分享任务，`remoteDirectory` 是给定的值（nil 时是 Ferry 写入的值）。
+    private func savedShareJob(remoteDirectory: String?, phase: Job.Phase, fixture: Fixture) throws -> Job {
+        var job = Job(link: FakeNetdisk.link, password: nil, entries: fixture.netdisk.rootEntries(), transferFolder: "/Ferry")
+        job.phase = phase
+        job.accountUK = Fixture.accountUK
+        if phase == .downloading {
+            let url = fixture.downloads.appending(path: "a.bin")
+            try Data().write(to: url)
+            job.files = [JobFile(remotePath: job.remoteDirectory + "/a.bin", relativePath: "a.bin", size: 0, localURL: url)]
+        }
+        var object = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(job)) as? [String: Any])
+        if let remoteDirectory { object["remoteDirectory"] = remoteDirectory }
+        return try JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: object))
+    }
+
+    @Test func retryAndRemoveDeleteOnlyValidJobDirectory() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10)])
+        let invalid = try Self.invalidJobDirectories.map {
+            try savedShareJob(remoteDirectory: $0, phase: .failed(.transfer), fixture: fixture)
+        }
+        let valid = try savedShareJob(remoteDirectory: nil, phase: .failed(.transfer), fixture: fixture)
+        try fixture.store.save(invalid + [valid])
+        let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true, maxConcurrentFiles: 4))
+        await coordinator.start()
+
+        for job in invalid {
+            await coordinator.retry(job.id)
+            try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+            #expect(coordinator.job(job.id)?.error == TransferCheckError.missingJobDirectory.errorDescription)
+            await coordinator.remove(job.id)
+        }
+        #expect(fixture.netdisk.operations.isEmpty)
+
+        await coordinator.remove(valid.id)
+        #expect(fixture.netdisk.deletes == [[valid.remoteDirectory]])
+    }
+
+    @Test func retryOfValidJobDirectoryStillDeletesFirst() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10)])
+        let job = try savedShareJob(remoteDirectory: nil, phase: .failed(.transfer), fixture: fixture)
+        try fixture.store.save([job])
+        let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true, maxConcurrentFiles: 4))
+        await coordinator.start()
+
+        await coordinator.retry(job.id)
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        // 重试前删除一次，清理时再删除一次。
+        #expect(fixture.netdisk.deletes == [[job.remoteDirectory], [job.remoteDirectory]])
+    }
+
+    @Test func cleanupDeletesOnlyValidJobDirectory() async throws {
+        let fixture = Fixture()
+        let invalid = try Self.invalidJobDirectories.map {
+            try savedShareJob(remoteDirectory: $0, phase: .downloading, fixture: fixture)
+        }
+        let valid = try savedShareJob(remoteDirectory: nil, phase: .downloading, fixture: fixture)
+        try fixture.store.save(invalid + [valid])
+        let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true, maxConcurrentFiles: 4))
+        await coordinator.start()
+
+        for job in invalid + [valid] {
+            try await coordinator.waitForPhase(.completed, of: job.id)
+        }
+        #expect(fixture.netdisk.deletes == [[valid.remoteDirectory]])
+        #expect(coordinator.job(valid.id)?.isCleanedUp == true)
+        #expect(invalid.allSatisfy { coordinator.job($0.id)?.isCleanedUp == false })
+    }
 }
