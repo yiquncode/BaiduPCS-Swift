@@ -35,12 +35,22 @@ struct MainView: View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            model.presentAddLink()
+                        Menu {
+                            Button {
+                                model.presentAddLink()
+                            } label: {
+                                Label("添加分享链接…", systemImage: "link")
+                            }
+                            Button {
+                                model.presentNetdiskDownload()
+                            } label: {
+                                Label("从我的网盘下载…", systemImage: "cloud")
+                            }
+                            .disabled(!model.canDownloadFromNetdisk)
                         } label: {
-                            Label("添加链接", systemImage: "plus")
+                            Label("添加任务", systemImage: "plus")
                         }
-                        .help("添加分享链接")
+                        .help("添加任务")
                     }
                     ToolbarItem(placement: .primaryAction) {
                         PauseResumeAllButton()
@@ -141,7 +151,8 @@ private struct PendingRemoval {
                 message += "未完成的下载会取消，并删除已下载的部分。"
             }
         }
-        if cleansUp {
+        // 网盘任务没有转存文件。
+        if cleansUp, jobs.contains(where: \.hasJobDirectory) {
             message += jobs.count == 1 ? "网盘中这个任务的转存文件也会删除。" : "网盘中这些任务的转存文件也会删除。"
         }
         return message

@@ -28,6 +28,7 @@ final class AppModel {
     /// 主窗口的 sheet。同一时间只显示一个。
     enum Sheet: String, Identifiable {
         case addLink
+        case netdiskDownload
 
         var id: String { rawValue }
     }
@@ -354,6 +355,14 @@ final class AppModel {
         }
     }
 
+    /// 未登录时入口不可用（见 `canDownloadFromNetdisk`）。
+    func presentNetdiskDownload() {
+        guard canDownloadFromNetdisk else { return }
+        sheet = .netdiskDownload
+    }
+
+    var canDownloadFromNetdisk: Bool { account != nil }
+
     /// 应用变为活跃时调用。剪贴板中有新复制的分享链接时，打开添加链接，由 sheet 填入。
     /// 未登录、已有 sheet、剪贴板已经读过（包括手动打开添加链接时），或链接已经是一个任务的来源时不打开。
     func detectCopiedLink() async {
@@ -419,6 +428,12 @@ final class AppModel {
     /// `downloadFolder` 为 nil 时，任务使用设置中的下载目录。
     func addJob(session: ShareSession, entries: [ShareEntry], downloadFolder: DownloadFolder? = nil) {
         coordinator.addJob(session: session, entries: entries, downloadFolder: downloadFolder)
+        requestNotificationAuthorization()
+    }
+
+    /// `downloadFolder` 为 nil 时，任务使用设置中的下载目录。
+    func addNetdiskJob(entries: [NetdiskEntry], downloadFolder: DownloadFolder? = nil) {
+        coordinator.addNetdiskJob(entries: entries, downloadFolder: downloadFolder)
         requestNotificationAuthorization()
     }
 

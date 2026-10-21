@@ -115,7 +115,10 @@ private struct JobDetail: View {
                         }
                     }
                 }
-                if !job.isCleanedUp {
+                if let netdiskSource = job.netdiskSource {
+                    LabeledContent("来源") { PathText(netdiskSource) }
+                }
+                if job.hasJobDirectory, !job.isCleanedUp {
                     LabeledContent("网盘") { PathText(job.remoteDirectory) }
                 }
                 LabeledContent("本地") {
@@ -265,5 +268,12 @@ extension Job {
         let url = link.url.absoluteString
         guard let password = password ?? link.password else { return url }
         return "\(url)?pwd=\(password)"
+    }
+
+    /// 网盘任务的来源：勾选条目的网盘路径。勾选了多个条目时显示第一个和数量。分享任务为 nil。
+    var netdiskSource: String? {
+        guard case .netdisk(let entries) = source, let first = entries.first else { return nil }
+        let path = entries.count == 1 ? first.path : "\(first.path) 等 \(entries.count) 项"
+        return "我的网盘 · \(path)"
     }
 }

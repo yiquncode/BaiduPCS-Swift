@@ -44,6 +44,11 @@ private struct FerryCommands: Commands {
                 model.presentAddLink()
             }
             .keyboardShortcut("n")
+            Button("从我的网盘下载…") {
+                openWindow(id: ContentView.windowID)
+                model.presentNetdiskDownload()
+            }
+            .disabled(!model.canDownloadFromNetdisk)
         }
         CommandMenu("任务") {
             // 主窗口不是当前窗口时没有选中的任务，这些操作都不可用。

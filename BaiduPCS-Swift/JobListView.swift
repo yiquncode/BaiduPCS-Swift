@@ -178,7 +178,7 @@ enum JobAction: CaseIterable {
 }
 
 extension Job {
-    /// 任务行行尾的操作：下载中为暂停，已暂停为继续，失败为重试，已完成为在 Finder 中显示。转存中没有操作。
+    /// 任务行行尾的操作：下载中为暂停，已暂停为继续，失败为重试，已完成为在 Finder 中显示。转存中（网盘任务：准备中）没有操作。
     var primaryAction: JobAction? {
         switch phase {
         case .transferring: nil
@@ -247,7 +247,7 @@ struct JobProgressBar: View {
     }
 }
 
-/// 任务的状态行：状态，以及已下载 / 总大小 · 速度 · 剩余时间。
+/// 任务的状态行：来源图标、状态，以及已下载 / 总大小 · 速度 · 剩余时间。
 struct JobStatusLine: View {
     let job: Job
     let activity: JobActivity
@@ -256,6 +256,8 @@ struct JobStatusLine: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            Image(systemName: job.isNetdisk ? "cloud" : "link")
+                .accessibilityLabel(job.isNetdisk ? "来自我的网盘" : "来自分享链接")
             Text(isRemoving
                  ? "正在移除…"
                  : job.statusText(isRunning: activity.isRunning, cleansUp: model.settings.cleanupAfterDownload))
@@ -282,7 +284,9 @@ struct JobNotes: View {
                 .textSelection(.enabled)
         }
         if model.coordinator.belongsToOtherAccount(job) {
-            Text("这个任务属于另一个百度账号，不会对它做转存、清理等网盘操作。")
+            Text(job.isNetdisk
+                 ? "这个任务属于另一个百度账号，不会为它列出网盘中的文件。"
+                 : "这个任务属于另一个百度账号，不会对它做转存、清理等网盘操作。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

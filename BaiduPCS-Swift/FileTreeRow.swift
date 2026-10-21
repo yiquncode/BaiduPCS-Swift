@@ -1,11 +1,17 @@
 import SwiftUI
 
 /// 文件树中的一行。目录展开时加载子项。
-struct FileTreeRow<Entry: FileTreeEntry>: View {
+///
+/// 调用方可以在名字后面加标签（`badge`），并决定行尾的列（`columns`，默认只有文件大小）。
+struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
     let node: FileNode<Entry>
     let tree: FileTree<Entry>
     /// 上层目录已勾选，这一项随目录一起下载。
     let isIncluded: Bool
+    /// 名字后面的标签，例如网盘树中的“转存目录”。
+    @ViewBuilder let badge: (Entry) -> Badge
+    /// 行尾的列。
+    @ViewBuilder let columns: (Entry) -> Columns
 
     var body: some View {
         if node.isDirectory {
@@ -15,7 +21,8 @@ struct FileTreeRow<Entry: FileTreeEntry>: View {
                         Text("空目录").foregroundStyle(.secondary)
                     }
                     ForEach(children) { child in
-                        FileTreeRow(node: child, tree: tree, isIncluded: isIncluded || tree.isSelected(node))
+                        FileTreeRow(node: child, tree: tree, isIncluded: isIncluded || tree.isSelected(node),
+                                    badge: badge, columns: columns)
                     }
                 } else if let error = node.loadError {
                     HStack {
@@ -51,9 +58,14 @@ struct FileTreeRow<Entry: FileTreeEntry>: View {
         return HStack {
             Toggle(isOn: Binding(get: { isIncluded || tree.isSelected(node) }, set: { tree.setSelected(node, $0) })) {
                 Label {
-                    Text(entry?.name ?? "")
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    HStack(spacing: 6) {
+                        Text(entry?.name ?? "")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if let entry {
+                            badge(entry)
+                        }
+                    }
                 } icon: {
                     Image(systemName: FileIcon.systemName(for: entry?.name ?? "", isDirectory: node.isDirectory))
                         .foregroundStyle(node.isDirectory ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
@@ -63,11 +75,30 @@ struct FileTreeRow<Entry: FileTreeEntry>: View {
             .toggleStyle(.checkbox)
             .disabled(isIncluded)
             Spacer()
-            if let entry, !entry.isDirectory {
-                Text(entry.size.byteCount)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+            if let entry {
+                columns(entry)
             }
+        }
+    }
+}
+
+extension FileTreeRow where Badge == EmptyView, Columns == FileSizeText<Entry> {
+    /// 没有标签，行尾只有文件大小。
+    init(node: FileNode<Entry>, tree: FileTree<Entry>, isIncluded: Bool) {
+        self.init(node: node, tree: tree, isIncluded: isIncluded, badge: { _ in EmptyView() },
+                  columns: { FileSizeText(entry: $0) })
+    }
+}
+
+/// 文件树中文件的大小。目录不显示。
+struct FileSizeText<Entry: FileTreeEntry>: View {
+    let entry: Entry
+
+    var body: some View {
+        if !entry.isDirectory {
+            Text(entry.size.byteCount)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
         }
     }
 }

@@ -11,6 +11,7 @@ nonisolated protocol FileTreeEntry: Identifiable {
 }
 
 extension ShareEntry: FileTreeEntry {}
+extension NetdiskEntry: FileTreeEntry {}
 
 /// 文件树中的一个目录或文件。目录的子项在展开时才加载。
 @Observable

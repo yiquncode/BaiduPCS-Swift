@@ -36,19 +36,27 @@ extension JobProgress {
 extension Job {
     var isUnfinished: Bool { phase != .completed }
 
+    /// 来源是我的网盘。
+    var isNetdisk: Bool {
+        if case .netdisk = source { true } else { false }
+    }
+
     /// `isRunning`：有文件正在下载（见 `JobActivity`）。`cleansUp`：设置中的清理开关。
+    /// 网盘任务的第一步是准备，没有转存和清理。
     func statusText(isRunning: Bool, cleansUp: Bool) -> String {
         switch phase {
         case .transferring:
-            return "正在转存…"
+            return isNetdisk ? "准备中 · 正在列出文件…" : "正在转存…"
         case .downloading:
             if isPaused { return "已暂停" }
-            if files.allSatisfy(\.isCompleted) { return cleansUp ? "正在清理网盘中的转存文件…" : "正在完成…" }
+            if files.allSatisfy(\.isCompleted) {
+                return cleansUp && hasJobDirectory ? "正在清理网盘中的转存文件…" : "正在完成…"
+            }
             return isRunning ? "正在下载" : "等待下载"
         case .completed:
             return "已完成"
         case .failed(.transfer):
-            return "转存失败"
+            return isNetdisk ? "准备失败" : "转存失败"
         case .failed(.download):
             return "下载失败"
         }

@@ -19,6 +19,7 @@ struct ContentView: View {
             .sheet(item: $model.sheet) { sheet in
                 switch sheet {
                 case .addLink: AddLinkView()
+                case .netdiskDownload: NetdiskDownloadView()
                 }
             }
             .onAppear {
@@ -26,6 +27,9 @@ struct ContentView: View {
                 model.openLoginWindow = { [openWindow] in openWindow(id: LoginView.windowID) }
                 #if DEBUG
                 if DemoData.isEnabled, DemoData.settingsTab != nil { openSettings() }
+                if DemoData.isEnabled, let sheet = DemoData.sheet.flatMap(AppModel.Sheet.init(rawValue:)) {
+                    model.sheet = sheet
+                }
                 #endif
             }
     }
