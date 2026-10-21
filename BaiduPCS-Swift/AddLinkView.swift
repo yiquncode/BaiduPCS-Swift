@@ -17,7 +17,7 @@ struct AddLinkView: View {
     @State private var pasted: (link: String, password: String)?
     @State private var openTask: Task<Void, Never>?
     @State private var errorMessage: String?
-    @State private var tree: ShareTree?
+    @State private var share: OpenedShare?
     @State private var isSubmitting = false
     /// 用户在“保存到”菜单中用“其他…”选择的目录。只用于这个任务，不修改设置。
     @State private var chosenFolders: [DownloadFolder] = []
@@ -76,7 +76,7 @@ struct AddLinkView: View {
                         .onChange(of: password) { closeShare() }
                 }
                 Button("打开", action: openShare)
-                    .keyboardShortcut(tree == nil ? .defaultAction : nil)
+                    .keyboardShortcut(share == nil ? .defaultAction : nil)
                     .disabled(!canOpen)
             }
             .disabled(isOpening)
@@ -95,8 +95,8 @@ struct AddLinkView: View {
 
     @ViewBuilder
     private var shareContent: some View {
-        if let tree {
-            ShareBrowser(tree: tree)
+        if let share {
+            ShareBrowser(tree: share.tree)
         } else if isOpening {
             ProgressView("正在打开分享…")
         } else if let errorMessage {
@@ -132,8 +132,8 @@ struct AddLinkView: View {
                 Button("取消", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button("下载", action: download)
-                    .keyboardShortcut(tree == nil ? nil : .defaultAction)
-                    .disabled(tree?.selection.isEmpty ?? true || isSubmitting)
+                    .keyboardShortcut(share == nil ? nil : .defaultAction)
+                    .disabled(share?.tree.selection.isEmpty ?? true || isSubmitting)
             }
         }
     }
@@ -216,14 +216,14 @@ struct AddLinkView: View {
     /// 打开期间输入框不可用，这时的变化来自填入后立即打开，不清空。
     private func closeShare() {
         guard !isOpening else { return }
-        tree = nil
+        share = nil
         errorMessage = nil
     }
 
     /// 在启动任务之前就进入“正在打开”状态，连按也只打开一次。
     private func openShare() {
         guard !isOpening else { return }
-        tree = nil
+        share = nil
         guard let client = model.client else {
             errorMessage = "未登录百度网盘。"
             return
@@ -239,8 +239,10 @@ struct AddLinkView: View {
             do {
                 let session = try await client.openShare(link, password: password)
                 try Task.checkCancellation()
-                let tree = ShareTree(client: client, session: session, onError: { model.noteError($0) })
-                self.tree = tree
+                let tree = FileTree<ShareEntry>(initialSelection: .all) { directory in
+                    try await client.listShare(session, directory: directory)
+                } onError: { model.noteError($0) }
+                share = OpenedShare(session: session, tree: tree)
                 await tree.load(tree.root)
             } catch is CancellationError {
                 return
@@ -258,16 +260,22 @@ struct AddLinkView: View {
     }
 
     private func download() {
-        guard let tree, !tree.selection.isEmpty, !isSubmitting else { return }
+        guard let share, !share.tree.selection.isEmpty, !isSubmitting else { return }
         isSubmitting = true
-        model.addJob(session: tree.session, entries: tree.selectedEntries, downloadFolder: selectedFolder)
+        model.addJob(session: share.session, entries: share.tree.selectedEntries, downloadFolder: selectedFolder)
         dismiss()
     }
 }
 
+/// 已打开的分享会话和它的文件树。
+private struct OpenedShare {
+    let session: ShareSession
+    let tree: FileTree<ShareEntry>
+}
+
 /// 分享的文件树：表头的全选和文件列表。
 private struct ShareBrowser: View {
-    let tree: ShareTree
+    let tree: FileTree<ShareEntry>
 
     var body: some View {
         VStack(spacing: 0) {
@@ -299,7 +307,7 @@ private struct ShareBrowser: View {
             } else {
                 List {
                     ForEach(children) { node in
-                        ShareNodeRow(node: node, tree: tree, isIncluded: false)
+                        FileTreeRow(node: node, tree: tree, isIncluded: false)
                     }
                 }
             }
@@ -313,78 +321,6 @@ private struct ShareBrowser: View {
             }
         } else {
             ProgressView("正在加载…")
-        }
-    }
-}
-
-/// 文件树中的一行。目录展开时加载子项。
-private struct ShareNodeRow: View {
-    let node: ShareNode
-    let tree: ShareTree
-    /// 上层目录已勾选，这一项随目录一起下载。
-    let isIncluded: Bool
-
-    var body: some View {
-        if node.isDirectory {
-            DisclosureGroup(isExpanded: expansion) {
-                if let children = node.children {
-                    if children.isEmpty {
-                        Text("空目录").foregroundStyle(.secondary)
-                    }
-                    ForEach(children) { child in
-                        ShareNodeRow(node: child, tree: tree, isIncluded: isIncluded || tree.isSelected(node))
-                    }
-                } else if let error = node.loadError {
-                    HStack {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                        Button("重试") { Task { await tree.load(node) } }
-                    }
-                } else {
-                    HStack {
-                        ProgressView().controlSize(.small)
-                        Text("正在加载…").foregroundStyle(.secondary)
-                    }
-                }
-            } label: {
-                label
-            }
-        } else {
-            label
-        }
-    }
-
-    private var expansion: Binding<Bool> {
-        Binding {
-            node.isExpanded
-        } set: { expanded in
-            node.isExpanded = expanded
-            if expanded { Task { await tree.load(node) } }
-        }
-    }
-
-    private var label: some View {
-        let entry = node.entry
-        return HStack {
-            Toggle(isOn: Binding(get: { isIncluded || tree.isSelected(node) }, set: { tree.setSelected(node, $0) })) {
-                Label {
-                    Text(entry?.name ?? "")
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                } icon: {
-                    Image(systemName: FileIcon.systemName(for: entry?.name ?? "", isDirectory: node.isDirectory))
-                        .foregroundStyle(node.isDirectory ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                        .accessibilityHidden(true)
-                }
-            }
-            .toggleStyle(.checkbox)
-            .disabled(isIncluded)
-            Spacer()
-            if let entry, !entry.isDirectory {
-                Text(entry.size.byteCount)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
         }
     }
 }
