@@ -204,7 +204,7 @@ extension Job {
     }
 
     var systemImage: String {
-        entries.count == 1 && !entries[0].isDirectory ? FileIcon.systemName(for: title, isDirectory: false) : "folder"
+        source.isSingleFile ? FileIcon.systemName(for: title, isDirectory: false) : "folder"
     }
 }
 

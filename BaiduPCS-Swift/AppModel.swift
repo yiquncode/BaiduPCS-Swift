@@ -360,7 +360,7 @@ final class AppModel {
         guard settings.detectsCopiedLinks, coordinator.isStarted, account != nil, sheet == nil,
               pasteboardCheck?.changeCount != NSPasteboard.general.changeCount else { return }
         guard let link = await shareLinkOnPasteboard(), sheet == nil,
-              !coordinator.jobs.contains(where: { $0.link.surl == link.surl }) else { return }
+              !coordinator.jobs.contains(where: { $0.link?.surl == link.surl }) else { return }
         openMainWindow?()
         sheet = .addLink
     }

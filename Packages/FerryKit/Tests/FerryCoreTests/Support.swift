@@ -5,13 +5,14 @@ import os
 import Testing
 @testable import FerryCore
 
-/// 内存中的假网盘。分享内容按相对路径保存；转存把它们复制到网盘路径下。
+/// 内存中的假网盘。分享内容按相对路径保存；转存把它们复制到网盘路径下。自己网盘中的文件按网盘路径保存。
 final class FakeNetdisk: Netdisk {
     enum Operation: Equatable {
         case openShare
         case createDirectory(String)
         case transfer(String)
         case list(String)
+        case listDirectory(String)
         case delete([String])
     }
 
@@ -24,15 +25,18 @@ final class FakeNetdisk: Netdisk {
         var nextListing: [RemoteFile]?
         var operations: [Operation] = []
         var transferFailures = 0
+        var listFailures = 0
         var deleteFailures = 0
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
 
-    init(share: [String: Data], emptyDirectories: Set<String> = []) {
+    /// - Parameter disk: 自己网盘中原来就有的文件，键是网盘路径。
+    init(share: [String: Data], emptyDirectories: Set<String> = [], disk: [String: Data] = [:]) {
         state.withLock {
             $0.share = share
             $0.emptyDirectories = emptyDirectories
+            $0.disk = disk
         }
     }
 
@@ -43,6 +47,12 @@ final class FakeNetdisk: Netdisk {
     /// 下一次转存复制一个条目后失败，模拟转存到一半中断。
     func failNextTransfer() { state.withLock { $0.transferFailures += 1 } }
     func failNextDelete() { state.withLock { $0.deleteFailures += 1 } }
+    /// 下一次递归列出失败。
+    func failNextList() { state.withLock { $0.listFailures += 1 } }
+    /// 收到的删除操作。网盘任务的测试要求它一直为空。
+    var deletes: [[String]] {
+        operations.compactMap { if case .delete(let paths) = $0 { paths } else { nil } }
+    }
     func setNextListing(_ files: [RemoteFile]) { state.withLock { $0.nextListing = files } }
 
     func openShare(_ link: ShareLink, password: String?) async throws -> ShareSession {
@@ -77,14 +87,34 @@ final class FakeNetdisk: Netdisk {
         return entries(under: prefix)
     }
 
-    func listFilesRecursively(_ path: String) async throws -> [RemoteFile] {
+    func listDirectory(_ path: String) async throws -> [NetdiskEntry] {
         state.withLock { state in
+            state.operations.append(.listDirectory(path))
+            let prefix = path.hasSuffix("/") ? path : path + "/"
+            let names = Set(state.disk.keys.filter { $0.hasPrefix(prefix) }
+                .map { String($0.dropFirst(prefix.count).split(separator: "/")[0]) })
+            return names.sorted().map { name in
+                let child = prefix + name
+                let data = state.disk[child]
+                return NetdiskEntry(fsID: Int64(child.hashValue), name: name, path: child, isDirectory: data == nil,
+                                    size: Int64(data?.count ?? 0))
+            }
+        }
+    }
+
+    func listFilesRecursively(_ path: String) async throws -> [RemoteFile] {
+        try state.withLock { state in
             state.operations.append(.list(path))
+            if state.listFailures > 0 {
+                state.listFailures -= 1
+                throw BaiduError.network("connection lost")
+            }
             if let listing = state.nextListing {
                 state.nextListing = nil
                 return listing
             }
-            return state.disk.filter { $0.key.hasPrefix(path + "/") }.sorted { $0.key < $1.key }
+            let prefix = path.hasSuffix("/") ? path : path + "/"
+            return state.disk.filter { $0.key.hasPrefix(prefix) }.sorted { $0.key < $1.key }
                 .enumerated().map { RemoteFile(path: $1.key, size: Int64($1.value.count), fsID: Int64($0)) }
         }
     }
@@ -249,9 +279,9 @@ final class Fixture {
     let server: FileServer
     let session = FileProtocol.makeSession()
 
-    init(share: [String: Data], emptyDirectories: Set<String> = []) {
+    init(share: [String: Data] = [:], emptyDirectories: Set<String> = [], disk: [String: Data] = [:]) {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("FerryCoreTests-\(UUID().uuidString)")
-        netdisk = FakeNetdisk(share: share, emptyDirectories: emptyDirectories)
+        netdisk = FakeNetdisk(share: share, emptyDirectories: emptyDirectories, disk: disk)
         server = FileServer(netdisk: netdisk)
         try? FileManager.default.createDirectory(at: directory.appendingPathComponent("downloads"), withIntermediateDirectories: true)
     }
@@ -274,8 +304,9 @@ final class Fixture {
 
     /// 已转存、文件列表已保存，但还没开始下载的任务。
     func makeTransferredJob() async throws -> Job {
-        var job = Job(link: FakeNetdisk.link, password: nil, entries: netdisk.rootEntries(), transferFolder: "/Ferry")
-        try await netdisk.transfer(FakeNetdisk.session, entries: job.entries, to: job.remoteDirectory)
+        let entries = netdisk.rootEntries()
+        var job = Job(link: FakeNetdisk.link, password: nil, entries: entries, transferFolder: "/Ferry")
+        try await netdisk.transfer(FakeNetdisk.session, entries: entries, to: job.remoteDirectory)
         job.files = try await netdisk.listFilesRecursively(job.remoteDirectory).map { file in
             JobFile(remotePath: file.path, relativePath: RemotePath.relativePath(of: file.path, in: job.remoteDirectory)!, size: file.size)
         }

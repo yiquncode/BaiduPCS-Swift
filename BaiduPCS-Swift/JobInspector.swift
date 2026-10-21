@@ -99,18 +99,20 @@ private struct JobDetail: View {
                 JobStats(job: job, activity: activity)
             }
             Section("位置") {
-                LabeledContent("来源") {
-                    HStack(spacing: 4) {
-                        PathText(job.sourceLink)
-                        Button {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(job.sourceLink, forType: .string)
-                        } label: {
-                            Label("拷贝链接", systemImage: "doc.on.doc")
+                if let sourceLink = job.sourceLink {
+                    LabeledContent("来源") {
+                        HStack(spacing: 4) {
+                            PathText(sourceLink)
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(sourceLink, forType: .string)
+                            } label: {
+                                Label("拷贝链接", systemImage: "doc.on.doc")
+                            }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.borderless)
+                            .help("拷贝链接")
                         }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                        .help("拷贝链接")
                     }
                 }
                 if !job.isCleanedUp {
@@ -257,8 +259,9 @@ private struct FileRow: View {
 }
 
 extension Job {
-    /// 来源分享链接。有提取码时放在 `pwd` 参数中，粘贴到“添加链接”时自动填入。
-    var sourceLink: String {
+    /// 来源分享链接。有提取码时放在 `pwd` 参数中，粘贴到“添加链接”时自动填入。网盘任务为 nil。
+    var sourceLink: String? {
+        guard let link else { return nil }
         let url = link.url.absoluteString
         guard let password = password ?? link.password else { return url }
         return "\(url)?pwd=\(password)"

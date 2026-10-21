@@ -20,7 +20,10 @@ public struct JobProgress: Sendable, Hashable {
     }
 }
 
-/// 推进任务：建任务子目录 → 转存 → 列出文件 → 下载 → 清理。它也保存任务列表，并在启动时恢复任务。
+/// 推进任务。分享任务：建任务子目录 → 转存 → 列出文件 → 下载 → 清理。网盘任务：列出文件（准备）→ 下载。
+/// 它也保存任务列表，并在启动时恢复任务。
+///
+/// 网盘任务的源文件是用户自己的文件。对网盘任务不调用 `Netdisk.delete`：删除只经过 `deleteJobDirectory(of:using:)`。
 ///
 /// 同一任务对下载引擎的操作（加入、暂停、继续）按顺序执行，每个操作执行时重新读取任务的当前状态，
 /// 所以暂停和继续交错时，引擎中的状态最终和任务的 `isPaused` 一致。
@@ -137,7 +140,7 @@ public final class JobCoordinator {
         }
         for index in loaded.indices where loaded[index].phase == .transferring {
             loaded[index].phase = .failed(.transfer)
-            loaded[index].error = "应用退出时转存没有完成。"
+            loaded[index].error = loaded[index].hasJobDirectory ? "应用退出时转存没有完成。" : "应用退出时准备没有完成。"
         }
         // 启动完成前添加的任务排在前面。
         jobs += loaded
@@ -247,6 +250,20 @@ public final class JobCoordinator {
         return job
     }
 
+    /// 创建网盘任务并开始准备：列出勾选的目录，然后直接下载。不转存，也不修改网盘中的文件。
+    /// - Parameter downloadFolder: 用户为这个任务选择的下载目录。nil 时使用 `self.downloadFolder`（设置中的下载目录）。
+    @discardableResult
+    public func addNetdiskJob(entries: [NetdiskEntry], downloadFolder: DownloadFolder? = nil) -> Job {
+        var job = Job(netdiskEntries: entries)
+        job.downloadFolder = downloadFolder ?? self.downloadFolder
+        job.accountUK = accountUK
+        jobs.insert(job, at: 0)
+        invalidateIndex()
+        save()
+        startTransfer(job.id, session: nil, removingExisting: false)
+        return job
+    }
+
     public func pause(_ id: Job.ID) async {
         await waitUntilStarted()
         guard let job = activeJob(id), job.phase == .downloading, !job.isPaused else { return }
@@ -277,8 +294,8 @@ public final class JobCoordinator {
             invalidateIndex()
             markChanged(id)
             save()
-            // 上次转存可能已经转存了一部分，留下来会产生同名冲突。
-            startTransfer(id, session: nil, removingExisting: true)
+            // 分享任务：上次转存可能已经转存了一部分，留下来会产生同名冲突。网盘任务只重新列出，不删除。
+            startTransfer(id, session: nil, removingExisting: job.hasJobDirectory)
         case .download:
             update(id) {
                 $0.phase = .downloading
@@ -325,9 +342,9 @@ public final class JobCoordinator {
         for file in job.files { fileActivities[file.id] = nil }
         save()
         closeFolder(of: id)
-        if settings.cleanupAfterDownload, !job.isCleanedUp, !belongsToOtherAccount(job), let netdisk {
+        if settings.cleanupAfterDownload, job.hasJobDirectory, !job.isCleanedUp, !belongsToOtherAccount(job), let netdisk {
             do {
-                try await netdisk.delete(paths: [job.remoteDirectory])
+                try await deleteJobDirectory(of: job, using: netdisk)
             } catch {
                 logger.error("cannot delete \(job.remoteDirectory): \(error.localizedDescription)")
             }
@@ -349,8 +366,9 @@ public final class JobCoordinator {
         return JobProgress(receivedBytes: received, totalBytes: job.totalBytes, bytesPerSecond: speed)
     }
 
-    // MARK: - 转存
+    // MARK: - 转存和准备
 
+    /// 开始任务的第一步：分享任务转存，网盘任务准备。
     private func startTransfer(_ id: Job.ID, session: ShareSession?, removingExisting: Bool) {
         tasks[id] = Task {
             await waitUntilStarted()
@@ -358,39 +376,32 @@ public final class JobCoordinator {
         }
     }
 
+    /// 得到文件下载，然后开始下载。`session` 和 `removingExisting` 只用于分享任务。
     private func transfer(_ id: Job.ID, session: ShareSession?, removingExisting: Bool) async {
         guard let job = activeJob(id) else { return }
         do {
-            // 先确认下载目录可以写入，再在网盘中转存。
+            // 先确认下载目录可以写入，再操作网盘。
             _ = try folderURL(for: id)
             guard let netdisk else { throw CoordinatorError.notLoggedIn }
             guard !belongsToOtherAccount(job) else { throw CoordinatorError.otherAccount }
             if job.accountUK == nil {
                 update(id) { $0.accountUK = accountUK }
             }
-            if removingExisting {
-                try await netdisk.delete(paths: [job.remoteDirectory])
-            }
-            let share: ShareSession
-            if let session {
-                share = session
-            } else {
-                share = try await netdisk.openShare(job.link, password: job.password)
-            }
-            try await netdisk.createDirectory(job.remoteDirectory)
-            try await netdisk.transfer(share, entries: job.entries, to: job.remoteDirectory)
-            let remoteFiles = try await netdisk.listFilesRecursively(job.remoteDirectory)
+            let files: [JobFile]
             var warning: String?
-            if remoteFiles.isEmpty {
-                // 刚转存的文件可能还没出现在列表中。只有确认勾选的都是空目录时，才没有文件需要下载。
-                guard try await !containsFiles(job.entries, share: share, netdisk: netdisk) else {
-                    throw TransferCheckError.noFiles
-                }
-                warning = "勾选的目录中没有文件，不需要下载。"
+            switch job.source {
+            case .share(let link, let password, let entries):
+                let remoteFiles = try await transferShare(job, link: link, password: password, entries: entries,
+                                                          session: session, removingExisting: removingExisting, netdisk: netdisk)
+                if remoteFiles.isEmpty { warning = "勾选的目录中没有文件，不需要下载。" }
+                files = try Self.jobFiles(for: remoteFiles, in: job.remoteDirectory)
+            case .netdisk(let entries):
+                files = try await prepare(entries, netdisk: netdisk)
+                // 网盘的列表没有转存延迟，不用像分享任务那样再检查一次。
+                if files.isEmpty { warning = "勾选的目录中没有文件，不需要下载。" }
             }
             try Task.checkCancellation()
             guard activeJob(id) != nil else { return }
-            let files = try Self.jobFiles(for: remoteFiles, in: job.remoteDirectory)
             update(id) {
                 $0.files = files
                 $0.phase = .downloading
@@ -408,18 +419,90 @@ public final class JobCoordinator {
         }
     }
 
+    /// 分享任务的第一步：把勾选的条目转存到任务子目录，然后列出其中的文件。
+    /// 列出 0 个文件时，只有确认勾选的都是空目录才返回空列表，否则抛出错误。
+    private func transferShare(_ job: Job, link: ShareLink, password: String?, entries: [ShareEntry], session: ShareSession?,
+                               removingExisting: Bool, netdisk: any Netdisk) async throws -> [RemoteFile] {
+        // 路径为空时，建目录、转存和列出都会作用于网盘的根目录。
+        guard job.hasJobDirectory else { throw TransferCheckError.missingJobDirectory }
+        if removingExisting {
+            try await deleteJobDirectory(of: job, using: netdisk)
+        }
+        let share: ShareSession
+        if let session {
+            share = session
+        } else {
+            share = try await netdisk.openShare(link, password: password)
+        }
+        try await netdisk.createDirectory(job.remoteDirectory)
+        try await netdisk.transfer(share, entries: entries, to: job.remoteDirectory)
+        let remoteFiles = try await netdisk.listFilesRecursively(job.remoteDirectory)
+        // 刚转存的文件可能还没出现在列表中。只有确认勾选的都是空目录时，才没有文件需要下载。
+        if remoteFiles.isEmpty, try await containsFiles(entries, share: share, netdisk: netdisk) {
+            throw TransferCheckError.noFiles
+        }
+        return remoteFiles
+    }
+
+    /// 网盘任务的第一步（准备）：勾选的文件直接作为文件下载，勾选的目录递归列出。只读取网盘，不修改它。
+    private func prepare(_ entries: [NetdiskEntry], netdisk: any Netdisk) async throws -> [JobFile] {
+        var listed: [(file: RemoteFile, entry: NetdiskEntry)] = []
+        for entry in entries {
+            try Task.checkCancellation()
+            guard entry.isDirectory else {
+                listed.append((RemoteFile(path: entry.path, size: entry.size, fsID: entry.fsID), entry))
+                continue
+            }
+            // 空路径会被当作根目录，列出整个网盘。
+            guard !entry.path.isEmpty else { throw TransferCheckError.unsafePath(entry.name) }
+            for file in try await netdisk.listFilesRecursively(entry.path) {
+                listed.append((file, entry))
+            }
+        }
+        return try Self.jobFiles(for: listed)
+    }
+
     /// 转存后的网盘文件 → 文件下载。任何一个文件不在任务子目录中或路径不安全时抛出错误，不静默丢掉文件。
     static func jobFiles(for remoteFiles: [RemoteFile], in remoteDirectory: String) throws -> [JobFile] {
         let relativePaths = try remoteFiles.map { file in
             guard let relativePath = RemotePath.relativePath(of: file.path, in: remoteDirectory) else {
                 throw TransferCheckError.outsideJobDirectory(file.path)
             }
-            guard LocalPath.isSafe(relativePath) else { throw TransferCheckError.unsafePath(file.path) }
             return relativePath
+        }
+        return try jobFiles(for: remoteFiles, relativePaths: relativePaths)
+    }
+
+    /// 网盘任务列出的文件 → 文件下载。本地相对路径是网盘路径去掉勾选条目的上层目录：勾选 `/资料/2024/报告` 时是 `报告/…`。
+    /// 和分享任务相同，任何一个文件不在勾选的条目中或路径不安全时抛出错误；整个任务一起去重。
+    static func jobFiles(for listed: [(file: RemoteFile, entry: NetdiskEntry)]) throws -> [JobFile] {
+        let relativePaths = try listed.map { file, entry in
+            let isInside = entry.isDirectory
+                ? RemotePath.relativePath(of: file.path, in: entry.path) != nil
+                : file.path == entry.path
+            guard isInside, let relativePath = RemotePath.relativePath(of: file.path, in: RemotePath.parent(of: entry.path)) else {
+                throw TransferCheckError.outsideCheckedEntry(file.path)
+            }
+            return relativePath
+        }
+        return try jobFiles(for: listed.map(\.file), relativePaths: relativePaths)
+    }
+
+    /// 检查本地相对路径，然后去重。
+    private static func jobFiles(for remoteFiles: [RemoteFile], relativePaths: [String]) throws -> [JobFile] {
+        for (file, relativePath) in zip(remoteFiles, relativePaths) where !LocalPath.isSafe(relativePath) {
+            throw TransferCheckError.unsafePath(file.path)
         }
         return zip(remoteFiles, LocalPath.deduplicated(relativePaths)).map { file, relativePath in
             JobFile(remotePath: file.path, relativePath: relativePath, size: file.size)
         }
+    }
+
+    /// 删除网盘中的任务子目录（重试转存前和清理时）。网盘任务没有任务子目录，这里不删除任何东西：
+    /// 它的文件是用户自己的源文件。
+    private func deleteJobDirectory(of job: Job, using netdisk: any Netdisk) async throws {
+        guard job.hasJobDirectory else { return }
+        try await netdisk.delete(paths: [job.remoteDirectory])
     }
 
     /// 勾选的条目中是否有文件。目录逐层列出，找到第一个文件就停止。
@@ -631,11 +714,12 @@ public final class JobCoordinator {
         finishing.insert(id)
         tasks[id] = Task {
             defer { finishing.remove(id) }
-            if settings.cleanupAfterDownload, let job = activeJob(id), !job.isCleanedUp {
+            // 网盘任务没有转存的文件，不清理。
+            if settings.cleanupAfterDownload, let job = activeJob(id), job.hasJobDirectory, !job.isCleanedUp {
                 do {
                     guard let netdisk else { throw CoordinatorError.notLoggedIn }
                     guard !belongsToOtherAccount(job) else { throw CoordinatorError.otherAccount }
-                    try await netdisk.delete(paths: [job.remoteDirectory])
+                    try await deleteJobDirectory(of: job, using: netdisk)
                     update(id) { $0.isCleanedUp = true }
                 } catch {
                     guard !Task.isCancelled else { return }
@@ -655,7 +739,7 @@ public final class JobCoordinator {
         }
     }
 
-    /// 任务是用另一个账号创建的。这时不对它做任何网盘操作：任务子目录在那个账号的网盘中。
+    /// 任务是用另一个账号创建的。这时不对它做任何网盘操作：任务子目录（网盘任务：勾选的条目）在那个账号的网盘中。
     public func belongsToOtherAccount(_ job: Job) -> Bool {
         guard let owner = job.accountUK, let accountUK else { return false }
         return owner != accountUK
@@ -926,15 +1010,22 @@ private enum Outcome: Equatable {
 
 enum TransferCheckError: LocalizedError {
     case noFiles
+    case missingJobDirectory
     case outsideJobDirectory(String)
+    /// 网盘任务列出的文件不在勾选的条目中。
+    case outsideCheckedEntry(String)
     case unsafePath(String)
 
     var errorDescription: String? {
         switch self {
         case .noFiles:
             "转存后网盘中没有找到文件，可能转存尚未完成，请重试。"
+        case .missingJobDirectory:
+            "任务记录中没有任务子目录，无法转存。"
         case .outsideJobDirectory(let path):
             "转存后的文件“\(path)”不在任务子目录中，无法确定保存位置。"
+        case .outsideCheckedEntry(let path):
+            "列出的文件“\(path)”不在勾选的目录中，无法确定保存位置。"
         case .unsafePath(let path):
             "文件路径“\(path)”不能用作本地文件名，下载已停止。"
         }
