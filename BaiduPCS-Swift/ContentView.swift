@@ -3,66 +3,35 @@ import BaiduKit
 import FerryCore
 import SwiftUI
 
-/// 主窗口。没有任务且未登录时显示欢迎页；否则显示侧边栏和任务列表（见 `MainView`）。
+/// 主窗口：侧边栏、任务列表和详情栏（见 `MainView`），以及主窗口的 sheet。
 struct ContentView: View {
     static let windowID = "main"
-    /// 第一次显示任务列表时的窗口尺寸。
-    static let mainSize = CGSize(width: 960, height: 640)
 
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     #if DEBUG
     @Environment(\.openSettings) private var openSettings
     #endif
-    @State private var window: NSWindow?
-
-    private var showsWelcome: Bool { model.account == nil && model.coordinator.jobs.isEmpty }
 
     var body: some View {
         @Bindable var model = model
-        Group {
-            if showsWelcome {
-                WelcomeView()
-                    .frame(width: 600, height: 400)
-                    .edgeBar(.top) { Banners() }
-            } else {
-                MainView()
+        MainView()
+            .sheet(item: $model.sheet) { sheet in
+                switch sheet {
+                case .addLink: AddLinkView()
+                }
             }
-        }
-        .background(WindowReader(window: $window))
-        .sheet(item: $model.sheet) { sheet in
-            switch sheet {
-            case .addLink: AddLinkView()
+            .onAppear {
+                model.openMainWindow = { [openWindow] in openWindow(id: Self.windowID) }
+                model.openLoginWindow = { [openWindow] in openWindow(id: LoginView.windowID) }
+                #if DEBUG
+                if DemoData.isEnabled, DemoData.settingsTab != nil { openSettings() }
+                #endif
             }
-        }
-        .onAppear {
-            model.openMainWindow = { [openWindow] in openWindow(id: Self.windowID) }
-            model.openLoginWindow = { [openWindow] in openWindow(id: LoginView.windowID) }
-            #if DEBUG
-            if DemoData.isEnabled, DemoData.settingsTab != nil { openSettings() }
-            #endif
-        }
-        .onChange(of: showsWelcome) { _, showsWelcome in
-            guard !showsWelcome else { return }
-            // 窗口尺寸跟随内容，离开欢迎页时只会放大到任务列表的最小尺寸，所以改成默认尺寸。
-            // 等 SwiftUI 按任务列表更新了窗口的尺寸限制再改。
-            Task { growToMainSize() }
-        }
-    }
-
-    /// 保持窗口中心不变，放大到 `mainSize`。
-    private func growToMainSize() {
-        guard let window else { return }
-        let size = window.frameRect(forContentRect: CGRect(origin: .zero, size: Self.mainSize)).size
-        var frame = window.frame
-        frame.origin.x = frame.midX - size.width / 2
-        frame.origin.y = frame.midY - size.height / 2
-        frame.size = size
-        window.setFrame(window.constrainFrameRect(frame, to: window.screen), display: true, animate: true)
     }
 }
 
-/// 取得视图所在的窗口。SwiftUI 不能改窗口尺寸，在 macOS 14 上也不能关闭窗口恢复。
+/// 取得视图所在的窗口。在 macOS 14 上，SwiftUI 不能关闭窗口恢复。
 struct WindowReader: NSViewRepresentable {
     @Binding var window: NSWindow?
 

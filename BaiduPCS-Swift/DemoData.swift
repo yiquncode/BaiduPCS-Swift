@@ -10,7 +10,7 @@ import Foundation
 enum DemoData {
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: "FerryDemo") }
 
-    /// `-FerryDemoScene loggedOut` 显示欢迎页，`empty` 显示没有任务的列表。不传时显示演示任务。
+    /// `-FerryDemoScene loggedOut` 显示未登录、没有任务的列表，`empty` 显示已登录、没有任务的列表。不传时显示演示任务。
     private static var scene: String? { UserDefaults.standard.string(forKey: "FerryDemoScene") }
     static var isLoggedIn: Bool { scene != "loggedOut" }
     static var hasJobs: Bool { scene == nil }

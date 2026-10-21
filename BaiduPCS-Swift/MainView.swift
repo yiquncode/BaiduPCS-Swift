@@ -2,7 +2,7 @@ import AppKit
 import FerryCore
 import SwiftUI
 
-/// 已登录或有任务时的主窗口：侧边栏（任务分类和账号）、任务列表和详情栏。
+/// 主窗口的内容：侧边栏（任务分类和账号）、任务列表和详情栏。
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @State private var category: JobCategory? = .all
