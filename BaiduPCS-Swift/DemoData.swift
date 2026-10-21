@@ -45,24 +45,25 @@ enum DemoData {
         let now = Date.now
         var snapshots: [DownloadSnapshot] = []
 
-        var wwdc = job("WWDC25 Sessions", surl: "qYZEsSc", minutesAgo: 12, now: now)
-        wwdc.phase = .downloading
-        let sessions: [(String, Int64)] = [
-            ("108 Meet Liquid Glass.mp4", 1_400 * mb), ("101 Keynote.mp4", 2_100 * mb),
-            ("102 Platforms State of the Union.mp4", 1_800 * mb), ("201 What’s new in SwiftUI.mp4", 640 * mb),
-            ("202 SwiftUI essentials.mp4", 1_200 * mb), ("203 Build a SwiftUI app with the new design.mp4", 980 * mb),
+        // 任务名用明显可以合法分享的内容。不用影视、音乐等容易被看成盗版的内容，也不用真实的品牌和作品名。
+        var course = job("操作系统课程录像", surl: "qYZEsSc", minutesAgo: 12, now: now)
+        course.phase = .downloading
+        let lectures: [(String, Int64)] = [
+            ("第 01 讲 课程介绍.mp4", 1_400 * mb), ("第 02 讲 进程与线程.mp4", 2_100 * mb),
+            ("第 03 讲 CPU 调度.mp4", 1_800 * mb), ("第 04 讲 内存管理.mp4", 640 * mb),
+            ("第 05 讲 文件系统.mp4", 1_200 * mb), ("第 06 讲 期中复习.mp4", 980 * mb),
         ]
-        wwdc.files = sessions.enumerated().map { index, item in
-            file(item.0, size: item.1, in: "WWDC25 Sessions", completed: index < 2)
+        course.files = lectures.enumerated().map { index, item in
+            file(item.0, size: item.1, in: "操作系统课程录像", completed: index < 2)
         }
-        snapshots.append(DownloadSnapshot(id: wwdc.files[2].id, state: .running, totalBytes: wwdc.files[2].size,
+        snapshots.append(DownloadSnapshot(id: course.files[2].id, state: .running, totalBytes: course.files[2].size,
                                           receivedBytes: 1_116 * mb, bytesPerSecond: 8_600_000))
-        snapshots += wwdc.files[3...].map {
+        snapshots += course.files[3...].map {
             DownloadSnapshot(id: $0.id, state: .queued, totalBytes: $0.size, receivedBytes: 0, bytesPerSecond: 0)
         }
 
-        var earth = job("地球脉动 第三季", surl: "Ax7kP2mQ", minutesAgo: 3, now: now)
-        earth.phase = .transferring
+        var trip = job("家庭旅行视频 2026 夏", surl: "Ax7kP2mQ", minutesAgo: 3, now: now)
+        trip.phase = .transferring
 
         var thesis = job("毕业设计素材.zip", surl: "Rm3vT8wZ", minutesAgo: 20, now: now)
         thesis.phase = .downloading
@@ -78,7 +79,7 @@ enum DemoData {
         var papers = job("论文参考资料", surl: "Hd2sY6bK", minutesAgo: 90, now: now)
         papers.phase = .completed
         papers.files = [
-            ("Attention Is All You Need.pdf", 2 * mb), ("综述 · 大模型推理优化.pdf", 8 * mb),
+            ("开题报告.docx", 2 * mb), ("文献综述.pdf", 8 * mb),
             ("实验数据.xlsx", 41 * mb), ("答辩.key", 212 * mb), ("参考文献.bib", 1 * mb),
         ].map { file($0.0, size: $0.1, in: "论文参考资料", completed: true) }
 
@@ -86,7 +87,7 @@ enum DemoData {
         photos.phase = .completed
         photos.files = [file("Photos-2024.tar", size: 4_700 * mb, in: nil, completed: true)]
 
-        return ([earth, wwdc, thesis, ubuntu, papers, photos], snapshots)
+        return ([trip, course, thesis, ubuntu, papers, photos], snapshots)
     }
 
     private static func job(_ name: String, surl: String, minutesAgo: Double, now: Date) -> Job {
