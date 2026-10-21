@@ -26,8 +26,6 @@ struct JobListView: View {
             } else if model.coordinator.jobs.isEmpty {
                 ContentUnavailableView {
                     Label("没有任务", systemImage: "tray.and.arrow.down")
-                } description: {
-                    Text("粘贴百度网盘分享链接，选择要下载的文件。")
                 } actions: {
                     Button("添加链接…") { model.presentAddLink() }
                 }
