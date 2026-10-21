@@ -348,19 +348,25 @@ final class AppModel {
 
     // MARK: - 任务
 
-    /// 未登录时改为打开登录。
+    /// 未登录时改为打开登录。已经显示了一个 sheet 时不替换它（见 `present(_:)`）。
     func presentAddLink() {
         if account == nil {
             presentLogin()
         } else {
-            sheet = .addLink
+            present(.addLink)
         }
     }
 
-    /// 未登录时入口不可用（见 `canDownloadFromNetdisk`）。
+    /// 未登录时入口不可用（见 `canDownloadFromNetdisk`）。已经显示了一个 sheet 时不替换它（见 `present(_:)`）。
     func presentNetdiskDownload() {
         guard canDownloadFromNetdisk else { return }
-        sheet = .netdiskDownload
+        present(.netdiskDownload)
+    }
+
+    /// 已经显示了一个 sheet 时什么也不做：替换它会丢掉用户在其中的操作，例如已打开的分享。
+    private func present(_ sheet: Sheet) {
+        guard self.sheet == nil else { return }
+        self.sheet = sheet
     }
 
     var canDownloadFromNetdisk: Bool { account != nil }

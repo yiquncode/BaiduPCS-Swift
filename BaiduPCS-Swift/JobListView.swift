@@ -284,9 +284,7 @@ struct JobNotes: View {
                 .textSelection(.enabled)
         }
         if model.coordinator.belongsToOtherAccount(job) {
-            Text(job.isNetdisk
-                 ? "这个任务属于另一个百度账号，不会为它列出或下载网盘中的文件。"
-                 : "这个任务属于另一个百度账号，不会对它做转存、下载、清理等网盘操作。")
+            Text("这个任务属于另一个百度账号。登录那个账号后可以继续。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
