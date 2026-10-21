@@ -3,7 +3,7 @@
 [![release](https://img.shields.io/github/v/release/yiquncode/BaiduPCS-Swift?label=release&color=black)](https://github.com/yiquncode/BaiduPCS-Swift/releases/latest)
 ![macOS](https://img.shields.io/badge/macOS-14%2B-black)
 [![license](https://img.shields.io/github/license/yiquncode/BaiduPCS-Swift?color=blue)](LICENSE)
-[![website](https://img.shields.io/badge/website-Ferry-1ED4A8)](https://ferry-website.alvin-account.workers.dev)
+[![website](https://img.shields.io/badge/website-Ferry-1ED4A8)](https://ferry.lemmabyte.com)
 
 Ferry 是 Swift 编写的 macOS 原生百度网盘下载工具。它把分享链接中或自己网盘中的文件下载到本地。
 
