@@ -5,7 +5,7 @@
 [![license](https://img.shields.io/github/license/yiquncode/BaiduPCS-Swift?color=blue)](LICENSE)
 [![website](https://img.shields.io/badge/website-Ferry-1ED4A8)](https://ferry.lemmabyte.com)
 
-Ferry 是 Swift 编写的 macOS 原生百度网盘下载工具。它把分享链接中或自己网盘中的文件下载到本地。
+Ferry 是 Swift 编写的 macOS 原生百度网盘下载工具，运行时占用的资源很少。本软件不能提速，下载速度和官方客户端相同，由账号的会员等级决定。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/screenshot-dark.png">
@@ -14,10 +14,9 @@ Ferry 是 Swift 编写的 macOS 原生百度网盘下载工具。它把分享链
 
 ## 功能
 
-- **下载分享链接**：复制分享链接后切换到 Ferry，Ferry 自动填入链接和提取码并打开分享。文件先转存到自己网盘的 `/Ferry` 目录，再下载到本地。下载完成后可以自动删除转存的文件。
-- **从我的网盘下载**：在文件树中勾选自己网盘中的文件和目录，直接下载。Ferry 不修改、不删除网盘中的源文件。
-- **网页登录**：在百度的官方登录页登录。Ferry 只读取登录后的 Cookie，凭据存在 Keychain 中。
-- **按会员类型设置并发**：同时下载的文件数和每个文件的连接数默认都是 1。非超级会员使用多个连接会被百度限速，超级会员可以在设置中调高。
+- **下载分享链接**：复制分享链接后切换到 Ferry 打开分享。
+- **从我的网盘下载**：勾选自己网盘中的文件和目录，直接下载。
+- **无服务器**：Cookie 凭据存在 macOS Keychain 中，不经过第三方。
 
 ## 系统要求
 
@@ -30,18 +29,6 @@ Ferry 是 Swift 编写的 macOS 原生百度网盘下载工具。它把分享链
 
 Ferry 没有经过 Apple 公证。第一次打开时，macOS 不让它运行。打开“系统设置 → 隐私与安全性”，在“安全性”中点击“仍要打开”。
 
-## 开发
-
-要用自己的开发团队签名，在 `Config/Local.xcconfig` 中设置 `DEVELOPMENT_TEAM`。这个文件是可选的，不提交到仓库。
-
-`Packages/FerryKit` 中的 `LiveSmokeTests` 用真实账号做只读检查，设置以下环境变量后才运行：
-
-```sh
-FERRY_LIVE_COOKIE_FILE=~/cookie.txt \
-FERRY_LIVE_SHARE='https://pan.baidu.com/s/1qYZEsSc' \
-swift test --filter LiveSmokeTests
-```
-
 ## 项目结构
 
 ```
@@ -51,8 +38,6 @@ Packages/FerryKit/
 ├── BaiduKit             百度协议：凭据、分享、转存、网盘操作、下载链接
 └── DownloadKit          通用分片下载：分片、并发、断点续传、进度持久化
 ```
-
-`BaiduKit` 和 `DownloadKit` 互不依赖。`FerryCore` 把两者组合起来，不依赖界面。
 
 ## 致谢
 
